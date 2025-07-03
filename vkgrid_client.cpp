@@ -5,9 +5,20 @@
 #include <chrono>
 #include <thread>
 #include <string_view>
+#include <zstd.h>
 
 using udp = boost::asio::ip::udp;
 namespace json = boost::json;
+
+auto query_local_ep(boost::asio::io_context& ctx) {
+    udp::resolver resolver(ctx);
+    auto ep_iter = resolver.resolve("8.8.8.8", "53");
+    udp::endpoint test_ep = *ep_iter.begin();
+    udp::socket temp_sock(ctx, udp::v4());
+    temp_sock.connect(test_ep);
+    auto local_ep = temp_sock.local_endpoint();
+    return local_ep;
+}
 
 int main() {
     boost::asio::io_context ctx;
@@ -15,13 +26,15 @@ int main() {
     udp::socket sock(ctx);
     sock.open(udp::v4());
     sock.set_option(boost::asio::socket_base::broadcast(true));
-    sock.set_option(boost::asio::socket_base::reuse_address(true));
+    auto local_ep = query_local_ep(ctx);
+    auto local_ip   = local_ep.address().to_v4();
+    uint32_t ip_u   = local_ip.to_uint();
+    uint32_t mask_u = 0xFFFFFF00;                // /24
+    uint32_t b_u    = (ip_u & mask_u) | ~mask_u; // compute broadcast
+    auto bcast_addr = boost::asio::ip::address_v4{b_u};
 
     constexpr unsigned short port = 4000;
-    // Use IPv4 broadcast address
-    udp::endpoint broadcast_ep(
-        boost::asio::ip::address_v4::broadcast(), port
-    );
+    udp::endpoint broadcast_ep(bcast_addr, port);
 
     // Send a one-byte ping
     char ping = 0;
@@ -42,7 +55,6 @@ int main() {
             boost::asio::buffer(recv_buf), sender, 0, ec
         );
         if (ec == boost::asio::error::would_block) {
-            // no data yet, yield
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
@@ -51,8 +63,24 @@ int main() {
             break;
         }
 
-        // Parse JSON reply
-        std::string_view sv(recv_buf.data(), len);
+        if (len < sizeof(uint32_t)) continue;
+        uint32_t netSize;
+        std::memcpy(&netSize, recv_buf.data(), sizeof(netSize));
+        uint32_t origSize = ntohl(netSize);
+
+        // Decompress
+        std::vector<char> dBuffer(origSize);
+        size_t dSize = ZSTD_decompress(dBuffer.data(), origSize,
+                                       recv_buf.data() + sizeof(netSize),
+                                       len - sizeof(netSize));
+        if (ZSTD_isError(dSize)) {
+            std::cerr << "Zstd decompress error: "
+                      << ZSTD_getErrorName(dSize) << std::endl;
+            continue;
+        }
+
+        // Parse JSON
+        std::string_view sv(dBuffer.data(), origSize);
         json::value val = json::parse(sv);
         auto& arr = val.as_array();
 

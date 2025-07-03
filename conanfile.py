@@ -18,7 +18,10 @@ class Conan(ConanFile):
     ]
 
     requires = [
-        "vkeng/1.0@me/dev",
+        #"vkeng/1.0@me/dev",
+        "vulkan-headers/1.4.309.0",
+        "vulkan-loader/1.4.309.0",
+        "zstd/1.5.7",
     ]
     
     def configure(self):

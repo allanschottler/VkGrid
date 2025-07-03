@@ -1,6 +1,9 @@
 #include <vulkan/vulkan.hpp>
 #include <boost/asio.hpp>
 #include <boost/json.hpp>
+#include <zstd.h>
+#include <vector>
+#include <cstring>
 #include <iostream>
 
 using udp = boost::asio::ip::udp;
@@ -28,7 +31,6 @@ json::array query_gpus() {
 
 int main() {
     boost::asio::io_context ctx;
-    // Bind UDP socket to port 4000 and allow address reuse
     udp::socket sock(ctx);
     sock.open(udp::v4());
     sock.set_option(boost::asio::socket_base::reuse_address(true));
@@ -37,17 +39,36 @@ int main() {
     std::array<char,1> buf;
     udp::endpoint remote;
     for (;;) {
-        // Wait for a ping (any packet)
+        // Receive ping
         sock.receive_from(boost::asio::buffer(buf), remote);
 
-        // Query and serialize GPU info
+        // Serialize JSON
         auto gpus = query_gpus();
         std::string payload = json::serialize(gpus);
+        uint32_t origSize = static_cast<uint32_t>(payload.size());
 
-        // Reply to the sender
-        sock.send_to(boost::asio::buffer(payload), remote);
+        // Compress with Zstd
+        size_t maxCSize = ZSTD_compressBound(origSize);
+        std::vector<char> cBuffer(maxCSize);
+        size_t cSize = ZSTD_compress(cBuffer.data(), maxCSize,
+                                     payload.data(), origSize,
+                                     /* level */ 1);
+        if (ZSTD_isError(cSize)) {
+            std::cerr << "Zstd compress error: "
+                      << ZSTD_getErrorName(cSize) << std::endl;
+            continue;
+        }
+
+        // Prefix with original size (network order)
+        uint32_t netSize = htonl(origSize);
+        std::vector<char> sendBuf(sizeof(netSize) + cSize);
+        std::memcpy(sendBuf.data(), &netSize, sizeof(netSize));
+        std::memcpy(sendBuf.data() + sizeof(netSize), cBuffer.data(), cSize);
+
+        // Send compressed payload
+        sock.send_to(boost::asio::buffer(sendBuf), remote);
         std::cout << "Replied to " << remote.address().to_string()
-                  << " with " << gpus.size() << " device(s)" << std::endl; 
+                  << " (" << origSize << "->" << cSize << " bytes)" << std::endl;
     }
     return 0;
 }
