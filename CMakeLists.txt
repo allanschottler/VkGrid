@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Wall)
 
 find_package(Vulkan REQUIRED)
+find_package(glfw3 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system json)
 find_package(zstd CONFIG)
 
@@ -24,6 +25,8 @@ target_link_libraries(vkgrid_server
 add_executable(vkgrid_client vkgrid_client.cpp)
 target_link_libraries(vkgrid_client
     PRIVATE
+      Vulkan::Vulkan
+      glfw
       Boost::system
       Boost::json
       zstd
@@ -31,6 +34,6 @@ target_link_libraries(vkgrid_client
 
 if(WIN32)
   # On Windows, link against Winsock2 for any socket use
-  target_link_libraries(vkgrid_server PRIVATE ws2_32)
+  target_link_libraries(vkgrid_server PRIVATE ws2_32 mswsock)
   target_link_libraries(vkgrid_client PRIVATE ws2_32)
 endif()

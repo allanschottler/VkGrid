@@ -22,6 +22,8 @@ class Conan(ConanFile):
         "vulkan-headers/1.4.309.0",
         "vulkan-loader/1.4.309.0",
         "zstd/1.5.7",
+        "glfw/3.4",
+        "boost/1.85.0",
     ]
     
     def configure(self):

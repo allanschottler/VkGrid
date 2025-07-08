@@ -1,74 +1,211 @@
 #include <vulkan/vulkan.hpp>
 #include <boost/asio.hpp>
-#include <boost/json.hpp>
 #include <zstd.h>
 #include <vector>
-#include <cstring>
+#include <array>
+#include <chrono>
+#include <thread>
 #include <iostream>
+#include <cmath>
 
-using udp = boost::asio::ip::udp;
-namespace json = boost::json;
+using tcp = boost::asio::ip::tcp;
 
-// Gather local GPU info via Vulkan
-json::array query_gpus() {
-    json::array arr;
-    vk::ApplicationInfo appInfo{"UDP-GPU-Server", 1, "", 0, VK_API_VERSION_1_2};
-    vk::InstanceCreateInfo instInfo({}, &appInfo);
-    vk::UniqueInstance inst = vk::createInstanceUnique(instInfo);
+struct VulkanOffscreen {
+    vk::UniqueInstance      instance;
+    vk::UniqueDevice        device;
+    vk::Queue               queue;
+    uint32_t                qfi;
 
-    for (auto& dev : inst->enumeratePhysicalDevices()) {
-        auto p = dev.getProperties();
-        json::object obj;
-        obj["deviceName"]      = p.deviceName;
-        obj["vendorID"]        = p.vendorID;
-        obj["deviceID"]        = p.deviceID;
-        obj["apiVersionMajor"] = VK_VERSION_MAJOR(p.apiVersion);
-        obj["apiVersionMinor"] = VK_VERSION_MINOR(p.apiVersion);
-        arr.push_back(std::move(obj));
+    // Offscreen targets
+    vk::UniqueImage         colorImage;
+    vk::UniqueDeviceMemory  colorImageMemory;
+    vk::UniqueImageView     colorImageView;
+    vk::UniqueRenderPass    renderPass;
+    vk::UniqueFramebuffer   framebuffer;
+    vk::UniqueCommandPool   cmdPool;
+
+    // Staging for readback
+    vk::UniqueBuffer        stagingBuf;
+    vk::UniqueDeviceMemory  stagingMem;
+
+    const uint32_t          width = 800, height = 600;
+
+    VulkanOffscreen() {
+        //validation layer
+        std::vector<const char*> layers = {"VK_LAYER_KHRONOS_validation"};
+        
+        // Instance & device setup
+        vk::ApplicationInfo appInfo{"OffscreenClear", VK_MAKE_VERSION(1,2,0), "NoEngine", 0, VK_API_VERSION_1_2};
+        vk::InstanceCreateInfo ici{{}, &appInfo, static_cast<uint32_t>(layers.size()), layers.data(), 0, nullptr};
+        instance = vk::createInstanceUnique(ici);
+        // instance = vk::createInstanceUnique({{}, &appInfo, {}, {}});
+        auto phys = instance->enumeratePhysicalDevices().front();
+        auto families = phys.getQueueFamilyProperties();
+        for (uint32_t i = 0; i < families.size(); ++i) {
+            if (families[i].queueFlags & vk::QueueFlagBits::eGraphics) { qfi = i; break; }
+        }
+        float prio = 1.0f;
+        vk::DeviceQueueCreateInfo dqci{{}, qfi, 1, &prio};
+        device = phys.createDeviceUnique({{}, 1, &dqci});
+        queue  = device->getQueue(qfi, 0);
+        cmdPool = device->createCommandPoolUnique({{}, qfi});
+
+        // Create offscreen color image
+        vk::Format fmt = vk::Format::eR8G8B8A8Unorm;
+        vk::ImageCreateInfo imgInfo{{}, vk::ImageType::e2D, fmt,
+            {width, height, 1}, 1, 1, vk::SampleCountFlagBits::e1,
+            vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc};
+        colorImage = device->createImageUnique(imgInfo);
+        auto memReq = device->getImageMemoryRequirements(*colorImage);
+        auto memProps = phys.getMemoryProperties();
+        uint32_t idx = 0;
+        for (; idx < memProps.memoryTypeCount; ++idx) {
+            if ((memReq.memoryTypeBits & (1u << idx)) && (memProps.memoryTypes[idx].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal))
+                break;
+        }
+        colorImageMemory = device->allocateMemoryUnique({memReq.size, idx});
+        device->bindImageMemory(*colorImage, *colorImageMemory, 0);
+        vk::ImageViewCreateInfo ivInfo{{}, *colorImage, vk::ImageViewType::e2D, fmt,
+            {}, {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+        colorImageView = device->createImageViewUnique(ivInfo);
+
+        // Render pass: clear only
+        vk::AttachmentDescription attachDesc{ {}, fmt, vk::SampleCountFlagBits::e1,
+            vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
+            vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+            vk::ImageLayout::eUndefined,
+            vk::ImageLayout::eColorAttachmentOptimal  // changed here
+        };
+        vk::AttachmentReference colorRef{0, vk::ImageLayout::eColorAttachmentOptimal};
+        vk::SubpassDescription subpass{{}, vk::PipelineBindPoint::eGraphics,
+            0, nullptr, 1, &colorRef};
+        vk::RenderPassCreateInfo rpInfo{{}, 1, &attachDesc, 1, &subpass};
+        renderPass = device->createRenderPassUnique(rpInfo);
+
+        // Framebuffer
+        vk::FramebufferCreateInfo fbInfo{{}, *renderPass, 1, &*colorImageView, width, height, 1};
+        framebuffer = device->createFramebufferUnique(fbInfo);
+
+        // Staging buffer for readback
+        vk::BufferCreateInfo bufInfo{{}, width * height * 4, vk::BufferUsageFlagBits::eTransferDst};
+        stagingBuf = device->createBufferUnique(bufInfo);
+        auto bufReq = device->getBufferMemoryRequirements(*stagingBuf);
+        idx = 0;
+        for (; idx < memProps.memoryTypeCount; ++idx) {
+            auto flags = memProps.memoryTypes[idx].propertyFlags;
+            if ((bufReq.memoryTypeBits & (1u << idx)) && (flags & vk::MemoryPropertyFlagBits::eHostVisible) && (flags & vk::MemoryPropertyFlagBits::eHostCoherent))
+                break;
+        }
+        stagingMem = device->allocateMemoryUnique({bufReq.size, idx});
+        device->bindBufferMemory(*stagingBuf, *stagingMem, 0);
     }
-    return arr;
+
+    std::vector<uint8_t> renderFrame(float time) {
+        auto cbs = device->allocateCommandBuffersUnique({*cmdPool, vk::CommandBufferLevel::ePrimary, 1});
+        vk::CommandBuffer cb = *cbs.front();
+        cb.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+
+        // Transition to color attachment
+        vk::ImageMemoryBarrier barrier1{{}, vk::AccessFlagBits::eColorAttachmentWrite,
+            vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
+            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, *colorImage,
+            {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+        cb.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            {}, nullptr, nullptr, barrier1);
+
+        // Begin & end render pass (clear only)
+        vk::ClearValue clearColor{{(std::sin(time) + 1.0f) * 0.5f, 0.2f, 0.3f, 1.0f}};
+        vk::RenderPassBeginInfo rpbi{*renderPass, *framebuffer,
+            {{0,0}, {width, height}}, 1, &clearColor};
+        cb.beginRenderPass(rpbi, vk::SubpassContents::eInline);
+        cb.endRenderPass();
+
+        // Transition to transfer src
+        vk::ImageMemoryBarrier barrier2{
+            vk::AccessFlagBits::eColorAttachmentWrite,
+            vk::AccessFlagBits::eTransferRead,
+            vk::ImageLayout::eColorAttachmentOptimal,
+            vk::ImageLayout::eTransferSrcOptimal,
+            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+            *colorImage,
+            {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}
+        };
+        cb.pipelineBarrier(
+            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            vk::PipelineStageFlagBits::eTransfer,
+            vk::DependencyFlagBits::eByRegion,
+            nullptr, nullptr, barrier2);
+
+        // Copy to staging
+        vk::BufferImageCopy region{0,0,0,
+            {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+            {0,0,0}, {width, height, 1}};
+        cb.copyImageToBuffer(*colorImage, vk::ImageLayout::eTransferSrcOptimal,
+            *stagingBuf, 1, &region);
+        cb.end();
+
+        // Submit & wait
+        vk::SubmitInfo submit{0, nullptr, nullptr, 1, &cb};
+        queue.submit(submit, {});
+        queue.waitIdle();
+
+        // Read back pixels
+        void* ptr = device->mapMemory(*stagingMem, 0, VK_WHOLE_SIZE);
+        vk::MappedMemoryRange mrange(*stagingMem, 0, VK_WHOLE_SIZE);
+        device->invalidateMappedMemoryRanges(1, &mrange);
+        std::vector<uint8_t> pixels(width * height * 4);
+        std::memcpy(pixels.data(), ptr, pixels.size());
+        device->unmapMemory(*stagingMem);
+
+        return pixels;
+    }
+
+  private:
+    static uint32_t findMemoryType(vk::PhysicalDevice phys, uint32_t typeFilter, vk::MemoryPropertyFlags flags) {
+        auto memProps = phys.getMemoryProperties();
+        for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
+            if ((typeFilter & (1u << i)) && (memProps.memoryTypes[i].propertyFlags & flags) == flags)
+                return i;
+        }
+        throw std::runtime_error("No suitable memory type");
+    }
+};
+
+void session(tcp::socket sock) {
+    VulkanOffscreen gfx;
+    float t = 0.0f;
+    try {
+        while (true) {
+            auto pixels = gfx.renderFrame(t);
+            t += 0.016f;
+            // std::cout << "[Server] first pixel RGBA = "
+                    //   << +pixels[0] << ',' << +pixels[1] << ',' << +pixels[2] << ',' << +pixels[3] << '\n';
+            uint32_t orig = pixels.size();
+            size_t maxC = ZSTD_compressBound(orig);
+            std::vector<char> cbuf(maxC);
+            size_t csize = ZSTD_compress(cbuf.data(), maxC, pixels.data(), orig, 1);
+            if (ZSTD_isError(csize)) continue;
+            uint32_t no = htonl(orig), nc = htonl(static_cast<uint32_t>(csize));
+            boost::asio::write(sock, boost::asio::buffer(&no, sizeof(no)));
+            boost::asio::write(sock, boost::asio::buffer(&nc, sizeof(nc)));
+            boost::asio::write(sock, boost::asio::buffer(cbuf.data(), csize));
+            // std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Session error: " << e.what() << '\n';
+    }
 }
 
 int main() {
     boost::asio::io_context ctx;
-    udp::socket sock(ctx);
-    sock.open(udp::v4());
-    sock.set_option(boost::asio::socket_base::reuse_address(true));
-    sock.bind(udp::endpoint(udp::v4(), 4000));
-
-    std::array<char,1> buf;
-    udp::endpoint remote;
-    for (;;) {
-        // Receive ping
-        sock.receive_from(boost::asio::buffer(buf), remote);
-
-        // Serialize JSON
-        auto gpus = query_gpus();
-        std::string payload = json::serialize(gpus);
-        uint32_t origSize = static_cast<uint32_t>(payload.size());
-
-        // Compress with Zstd
-        size_t maxCSize = ZSTD_compressBound(origSize);
-        std::vector<char> cBuffer(maxCSize);
-        size_t cSize = ZSTD_compress(cBuffer.data(), maxCSize,
-                                     payload.data(), origSize,
-                                     /* level */ 1);
-        if (ZSTD_isError(cSize)) {
-            std::cerr << "Zstd compress error: "
-                      << ZSTD_getErrorName(cSize) << std::endl;
-            continue;
-        }
-
-        // Prefix with original size (network order)
-        uint32_t netSize = htonl(origSize);
-        std::vector<char> sendBuf(sizeof(netSize) + cSize);
-        std::memcpy(sendBuf.data(), &netSize, sizeof(netSize));
-        std::memcpy(sendBuf.data() + sizeof(netSize), cBuffer.data(), cSize);
-
-        // Send compressed payload
-        sock.send_to(boost::asio::buffer(sendBuf), remote);
-        std::cout << "Replied to " << remote.address().to_string()
-                  << " (" << origSize << "->" << cSize << " bytes)" << std::endl;
+    tcp::acceptor acceptor(ctx, {tcp::v4(), 5000});
+    std::cout << "Server listening on port 5000\n";
+    while (true) {
+        tcp::socket sock(ctx);
+        acceptor.accept(sock);
+        std::thread(session, std::move(sock)).detach();
     }
     return 0;
 }
