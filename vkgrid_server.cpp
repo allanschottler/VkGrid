@@ -1,5 +1,6 @@
 #include <vulkan/vulkan.hpp>
 #include <boost/asio.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include <zstd.h>
 #include <vector>
 #include <array>
@@ -9,6 +10,7 @@
 #include <cmath>
 
 using tcp = boost::asio::ip::tcp;
+using udp = boost::asio::ip::udp;
 
 struct VulkanOffscreen {
     vk::UniqueInstance      instance;
@@ -173,6 +175,21 @@ struct VulkanOffscreen {
     }
 };
 
+void discoveryThread() {
+    boost::asio::io_context ctx;
+    udp::socket sock(ctx, udp::endpoint(udp::v4(), 5001));
+    for (;;) {
+        std::array<char, 64> buf{};
+        udp::endpoint sender;
+        size_t len = sock.receive_from(boost::asio::buffer(buf), sender);
+        std::string msg(buf.data(), len);
+        if (msg == "DISCOVER_VKGRID_SERVER") {
+            std::string resp = "VKGRID_SERVER";
+            sock.send_to(boost::asio::buffer(resp), sender);
+        }
+    }
+}
+
 void session(tcp::socket sock) {
     VulkanOffscreen gfx;
     float t = 0.0f;
@@ -203,9 +220,11 @@ void session(tcp::socket sock) {
 }
 
 int main() {
+    std::thread(discoveryThread).detach();
     boost::asio::io_context ctx;
     tcp::acceptor acceptor(ctx, {tcp::v4(), 5000});
     std::cout << "[Server] Listening on port 5000\n";
+    std::cout << "[Server] Discovery on UDP port 5001\n";
     while (true) {
         tcp::socket sock(ctx);
         acceptor.accept(sock);
