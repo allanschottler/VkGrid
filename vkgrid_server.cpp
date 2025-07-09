@@ -176,12 +176,12 @@ struct VulkanOffscreen {
 void session(tcp::socket sock) {
     VulkanOffscreen gfx;
     float t = 0.0f;
+    std::cout << "[Server] New session started from " << sock.remote_endpoint() << '\n';
+
     try {
         while (true) {
             auto pixels = gfx.renderFrame(t);
             t += 0.016f;
-            // std::cout << "[Server] first pixel RGBA = "
-                    //   << +pixels[0] << ',' << +pixels[1] << ',' << +pixels[2] << ',' << +pixels[3] << '\n';
             uint32_t orig = pixels.size();
             size_t maxC = ZSTD_compressBound(orig);
             std::vector<char> cbuf(maxC);
@@ -191,17 +191,21 @@ void session(tcp::socket sock) {
             boost::asio::write(sock, boost::asio::buffer(&no, sizeof(no)));
             boost::asio::write(sock, boost::asio::buffer(&nc, sizeof(nc)));
             boost::asio::write(sock, boost::asio::buffer(cbuf.data(), csize));
-            // std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     } catch (const std::exception& e) {
         std::cerr << "Session error: " << e.what() << '\n';
     }
+
+    std::cout << "[Server] Session ended for " << sock.remote_endpoint() << '\n';
+    sock.shutdown(tcp::socket::shutdown_both); 
+    sock.close();
 }
 
 int main() {
     boost::asio::io_context ctx;
     tcp::acceptor acceptor(ctx, {tcp::v4(), 5000});
-    std::cout << "Server listening on port 5000\n";
+    std::cout << "[Server] Listening on port 5000\n";
     while (true) {
         tcp::socket sock(ctx);
         acceptor.accept(sock);

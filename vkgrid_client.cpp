@@ -23,6 +23,7 @@ void networkThread(const std::string& host) {
     boost::asio::io_context ctx;
     tcp::socket sock(ctx);
     boost::asio::connect(sock, tcp::resolver(ctx).resolve(host, "5000"));
+    std::cout << "[Client] Connected to " << host << ":5000\n";
 
     while (true) {
         uint32_t norig, nc;
@@ -43,6 +44,8 @@ void networkThread(const std::string& host) {
         std::lock_guard<std::mutex> lk(queueMutex);
         frameQueue.push_back(std::move(pixels));
     }
+
+    std::cout << "[Client] Disconnected from " << host << ":5000\n";
 }
 
 int main(){
