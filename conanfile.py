@@ -22,7 +22,7 @@ class Conan(ConanFile):
         "vulkan-headers/1.4.309.0",
         "vulkan-loader/1.4.309.0",
         "zstd/1.5.7",
-        "glfw/3.4",
+        "qt/6.5.3",
         "boost/1.85.0",
     ]
     
