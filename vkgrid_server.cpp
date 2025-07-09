@@ -175,16 +175,19 @@ struct VulkanOffscreen {
     }
 };
 
-void discoveryThread() {
+void discoveryThread(unsigned short port) {
     boost::asio::io_context ctx;
-    udp::socket sock(ctx, udp::endpoint(udp::v4(), 5001));
+    udp::socket sock(ctx);
+    sock.open(udp::v4());
+    sock.set_option(boost::asio::socket_base::reuse_address(true));
+    sock.bind(udp::endpoint(udp::v4(), 5001));
     for (;;) {
         std::array<char, 64> buf{};
         udp::endpoint sender;
         size_t len = sock.receive_from(boost::asio::buffer(buf), sender);
         std::string msg(buf.data(), len);
         if (msg == "DISCOVER_VKGRID_SERVER") {
-            std::string resp = "VKGRID_SERVER";
+            std::string resp = "VKGRID_SERVER:" + std::to_string(port);
             sock.send_to(boost::asio::buffer(resp), sender);
         }
     }
@@ -219,11 +222,16 @@ void session(tcp::socket sock) {
     sock.close();
 }
 
-int main() {
-    std::thread(discoveryThread).detach();
+int main(int argc, char* argv[]) {
+    unsigned short port = 5000;
+    if (argc > 1) {
+        port = static_cast<unsigned short>(std::stoi(argv[1]));
+    }
+
+    std::thread(discoveryThread, port).detach();
     boost::asio::io_context ctx;
-    tcp::acceptor acceptor(ctx, {tcp::v4(), 5000});
-    std::cout << "[Server] Listening on port 5000\n";
+    tcp::acceptor acceptor(ctx, {tcp::v4(), port});
+    std::cout << "[Server] Listening on port " << port << "\n";
     std::cout << "[Server] Discovery on UDP port 5001\n";
     while (true) {
         tcp::socket sock(ctx);

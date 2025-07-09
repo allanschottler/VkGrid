@@ -9,6 +9,7 @@
 #include <deque>
 #include <vector>
 #include <set>
+#include <string_view>
 #include <iostream>
 
 #ifdef _WIN32
@@ -20,7 +21,12 @@
 std::deque<std::vector<uint8_t>> frameQueue;
 std::mutex queueMutex;
 
-std::vector<std::string> discoverServers() {
+struct ServerInfo {
+    std::string address;
+    std::string port;
+};
+
+std::vector<ServerInfo> discoverServers() {
     using udp = boost::asio::ip::udp;
     boost::asio::io_context ctx;
     udp::socket sock(ctx);
@@ -30,7 +36,7 @@ std::vector<std::string> discoverServers() {
     std::string msg = "DISCOVER_VKGRID_SERVER";
     sock.send_to(boost::asio::buffer(msg), broadcast_ep);
     sock.non_blocking(true);
-    std::vector<std::string> servers;
+    std::vector<ServerInfo> servers;
     auto start = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - start < std::chrono::seconds(2)) {
         char buf[64];
@@ -39,20 +45,22 @@ std::vector<std::string> discoverServers() {
         size_t len = sock.receive_from(boost::asio::buffer(buf), sender, 0, ec);
         if (!ec && len > 0) {
             std::string resp(buf, buf + len);
-            if (resp == "VKGRID_SERVER") {
-                servers.push_back(sender.address().to_string());
+            constexpr std::string_view prefix = "VKGRID_SERVER:";
+            if (resp.rfind(prefix, 0) == 0) {
+                std::string port = resp.substr(prefix.size());
+                servers.push_back({sender.address().to_string(), port});
             }
         }
     }
     return servers;
 }
 
-void networkThread(const std::string& host) {
+void networkThread(const std::string& host, const std::string& port) {
     using tcp = boost::asio::ip::tcp;
     boost::asio::io_context ctx;
     tcp::socket sock(ctx);
-    boost::asio::connect(sock, tcp::resolver(ctx).resolve(host, "5000"));
-    std::cout << "[Client] Connected to " << host << ":5000\n";
+    boost::asio::connect(sock, tcp::resolver(ctx).resolve(host, port));
+    std::cout << "[Client] Connected to " << host << ":" << port << "\n";
 
     while (true) {
         uint32_t norig, nc;
@@ -74,7 +82,7 @@ void networkThread(const std::string& host) {
         frameQueue.push_back(std::move(pixels));
     }
 
-    std::cout << "[Client] Disconnected from " << host << ":5000\n";
+    std::cout << "[Client] Disconnected from " << host << ":" << port << "\n";
 }
 
 int main(){
@@ -86,7 +94,7 @@ int main(){
     }
     std::cout << "Available servers:" << std::endl;
     for(size_t i=0;i<servers.size();++i) {
-        std::cout << i << ": " << servers[i] << std::endl;
+        std::cout << i << ": " << servers[i].address << ":" << servers[i].port << std::endl;
     }
     std::cout << "Select server index: ";
     size_t idx=0;
@@ -95,7 +103,7 @@ int main(){
         std::cout << "Invalid selection" << std::endl;
         return 0;
     }
-    std::thread(networkThread, servers[idx]).detach();
+    std::thread(networkThread, servers[idx].address, servers[idx].port).detach();
 
     // GLFW + Vulkan
     glfwInit();
