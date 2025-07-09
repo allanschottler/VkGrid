@@ -1,0 +1,4 @@
+{
+  "setup": "./setup.sh",
+  "test": "cmake --build build/Release/generators --config Release"
+}
