@@ -1,9 +1,11 @@
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 #include <boost/asio.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include <zstd.h>
 #include <thread>
 #include <mutex>
+#include <chrono>
 #include <deque>
 #include <vector>
 #include <set>
@@ -17,6 +19,33 @@
 
 std::deque<std::vector<uint8_t>> frameQueue;
 std::mutex queueMutex;
+
+std::vector<std::string> discoverServers() {
+    using udp = boost::asio::ip::udp;
+    boost::asio::io_context ctx;
+    udp::socket sock(ctx);
+    sock.open(udp::v4());
+    sock.set_option(boost::asio::socket_base::broadcast(true));
+    udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
+    std::string msg = "DISCOVER_VKGRID_SERVER";
+    sock.send_to(boost::asio::buffer(msg), broadcast_ep);
+    sock.non_blocking(true);
+    std::vector<std::string> servers;
+    auto start = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(2)) {
+        char buf[64];
+        udp::endpoint sender;
+        boost::system::error_code ec;
+        size_t len = sock.receive_from(boost::asio::buffer(buf), sender, 0, ec);
+        if (!ec && len > 0) {
+            std::string resp(buf, buf + len);
+            if (resp == "VKGRID_SERVER") {
+                servers.push_back(sender.address().to_string());
+            }
+        }
+    }
+    return servers;
+}
 
 void networkThread(const std::string& host) {
     using tcp = boost::asio::ip::tcp;
@@ -50,7 +79,23 @@ void networkThread(const std::string& host) {
 
 int main(){
     const uint32_t WIDTH=800, HEIGHT=600;
-    std::thread(networkThread, "127.0.0.1").detach();
+    auto servers = discoverServers();
+    if(servers.empty()) {
+        std::cout << "No servers found" << std::endl;
+        return 0;
+    }
+    std::cout << "Available servers:" << std::endl;
+    for(size_t i=0;i<servers.size();++i) {
+        std::cout << i << ": " << servers[i] << std::endl;
+    }
+    std::cout << "Select server index: ";
+    size_t idx=0;
+    std::cin >> idx;
+    if(idx>=servers.size()) {
+        std::cout << "Invalid selection" << std::endl;
+        return 0;
+    }
+    std::thread(networkThread, servers[idx]).detach();
 
     // GLFW + Vulkan
     glfwInit();
