@@ -46,9 +46,11 @@ std::vector<DiscoveredServer> discoveredServers;
 std::mutex discoveryMutex;
 std::atomic_bool discoveryRun{true};
 std::shared_ptr<boost::asio::ip::tcp::socket> globalSock;
+std::atomic_bool clientRunning{true};
 
 void handleSignal(int){
     discoveryRun = false;
+    clientRunning.store(false);
     if(globalSock)
         globalSock->close();
 }
@@ -307,8 +309,10 @@ int main(int argc, char **argv){
     auto renderDone = device->createSemaphoreUnique(sci);
 
     // Main loop
-    while(window.isVisible()){
+    while(window.isVisible() && clientRunning.load()){
         app.processEvents();
+        if(!clientRunning.load())
+            window.close();
 
         std::vector<uint8_t> pixels;
         {

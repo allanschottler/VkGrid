@@ -9,14 +9,15 @@
 #include <iostream>
 #include <cmath>
 #include <csignal>
+#include <atomic>
 
 using tcp = boost::asio::ip::tcp;
 using udp = boost::asio::ip::udp;
 
-bool serverRunning = true;
+std::atomic_bool serverRunning{true};
 
 void handleSignal(int){
-    serverRunning = false;
+    serverRunning.store(false);
 }
 
 struct VulkanOffscreen {
@@ -194,7 +195,7 @@ void discoveryThread(unsigned short port) {
     auto next_announce = std::chrono::steady_clock::now();
 
     sock.non_blocking(true);
-    while (serverRunning) {
+    while (serverRunning.load()) {
         std::array<char, 64> buf{};
         udp::endpoint sender;
         boost::system::error_code ec;
@@ -224,7 +225,7 @@ void session(tcp::socket sock) {
     std::cout << "[Server] New session started from " << sock.remote_endpoint() << '\n';
 
     try {
-        while (serverRunning && sock.is_open()) {
+        while (serverRunning.load() && sock.is_open()) {
            auto pixels = gfx.renderFrame(t);
             t += 0.016f;
             uint32_t orig = pixels.size();
@@ -262,7 +263,7 @@ int main(int argc, char* argv[]) {
     acceptor.non_blocking(true);
     std::cout << "[Server] Listening on port " << port << "\n";
     std::cout << "[Server] Discovery on UDP port 5001\n";
-    while (serverRunning) {
+    while (serverRunning.load()) {
         tcp::socket sock(ctx);
         boost::system::error_code ec;
         acceptor.accept(sock, ec);
@@ -279,7 +280,7 @@ int main(int argc, char* argv[]) {
         std::thread(session, std::move(sock)).detach();
     }
     acceptor.close();
-    serverRunning = false;
+    serverRunning.store(false);
     dThread.join();
     std::cout << "[Server] Shutting down" << std::endl;
     return 0;
