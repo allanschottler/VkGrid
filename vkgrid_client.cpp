@@ -148,9 +148,13 @@ void networkThread(std::shared_ptr<boost::asio::ip::tcp::socket> sock,
            e.code() != boost::asio::error::eof &&
            e.code() != boost::asio::error::connection_reset)
             std::cerr << "[Client] network error: " << e.what() << '\n';
+        clientRunning.store(false);
     } catch(const std::exception& e) {
         std::cerr << "[Client] network error: " << e.what() << '\n';
+        clientRunning.store(false);
     }
+
+    clientRunning.store(false);
 
     boost::system::error_code ec;
     if(sock->is_open()) {
@@ -411,6 +415,8 @@ int main(int argc, char **argv){
         // ensure GPU done before cmdBuffers destroy
         device->waitIdle();
     }
+
+    clientRunning.store(false);
 
     if(globalSock && globalSock->is_open()){
         boost::system::error_code ec;
