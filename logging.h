@@ -4,7 +4,7 @@
 #include <boost/log/expressions.hpp>
 #include <boost/log/core.hpp>
 #include <boost/log/utility/setup/common_attributes.hpp>
-#include <boost/log/sinks/asynchronous_sink.hpp>
+#include <boost/log/sinks/async_frontend.hpp>
 #include <boost/log/sinks/text_ostream_backend.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/make_shared.hpp>
