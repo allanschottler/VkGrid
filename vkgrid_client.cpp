@@ -21,6 +21,7 @@
 #include <string_view>
 #include <iostream>
 #include <atomic>
+#include <csignal>
 
 #ifdef _WIN32
   #include <winsock2.h>
@@ -44,6 +45,12 @@ struct DiscoveredServer {
 std::vector<DiscoveredServer> discoveredServers;
 std::mutex discoveryMutex;
 std::atomic_bool discoveryRun{true};
+std::atomic_bool networkRun{true};
+
+void handleSignal(int){
+    discoveryRun = false;
+    networkRun = false;
+}
 
 void discoveryThreadFunc() {
     using udp = boost::asio::ip::udp;
@@ -108,14 +115,15 @@ void discoveryThreadFunc() {
     }
 }
 
-void networkThread(const std::string& host, const std::string& port) {
+void networkThread(const std::string& host, const std::string& port, std::atomic_bool& run) {
     using tcp = boost::asio::ip::tcp;
     boost::asio::io_context ctx;
     tcp::socket sock(ctx);
     boost::asio::connect(sock, tcp::resolver(ctx).resolve(host, port));
     std::cout << "[Client] Connected to " << host << ":" << port << "\n";
 
-    while (true) {
+    try {
+        while (run.load()) {
         uint32_t norig, nc;
         boost::asio::read(sock, boost::asio::buffer(&norig, 4));
         boost::asio::read(sock, boost::asio::buffer(&nc,    4));
@@ -133,8 +141,14 @@ void networkThread(const std::string& host, const std::string& port) {
 
         std::lock_guard<std::mutex> lk(queueMutex);
         frameQueue.push_back(std::move(pixels));
+        }
+    } catch(const std::exception& e) {
+        std::cerr << "[Client] network error: " << e.what() << '\n';
     }
 
+    boost::system::error_code ec;
+    sock.shutdown(tcp::socket::shutdown_both, ec);
+    sock.close(ec);
     std::cout << "[Client] Disconnected from " << host << ":" << port << "\n";
 }
 
@@ -143,7 +157,7 @@ int main(int argc, char **argv){
     const uint32_t WIDTH=800, HEIGHT=600;
     QApplication app(argc, argv);
 
-    std::thread(discoveryThreadFunc).detach();
+    std::thread discoverThread(discoveryThreadFunc);
 
     // Qt dialog for server selection
     QDialog dlg;
@@ -177,12 +191,12 @@ int main(int argc, char **argv){
 
     if(dlg.exec()!=QDialog::Accepted || list.currentRow()<0){
         discoveryRun = false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        discoverThread.join();
         return 0;
     }
 
     discoveryRun = false;
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    discoverThread.join();
     size_t idx = static_cast<size_t>(list.currentRow());
     ServerInfo chosen;
     {
@@ -191,7 +205,8 @@ int main(int argc, char **argv){
         chosen = discoveredServers[idx].info;
     }
 
-    std::thread(networkThread, chosen.address, chosen.port).detach();
+    signal(SIGINT, handleSignal);
+    std::thread netThread(networkThread, chosen.address, chosen.port, std::ref(networkRun));
 
     // Qt Vulkan window
     QVulkanInstance qInst;
@@ -381,6 +396,9 @@ int main(int argc, char **argv){
         // ensure GPU done before cmdBuffers destroy
         device->waitIdle();
     }
+
+    networkRun = false;
+    netThread.join();
 
     return 0;
 }
