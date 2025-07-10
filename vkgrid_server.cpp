@@ -241,6 +241,7 @@ void session(tcp::socket sock) {
         }
     } catch (const boost::system::system_error& e) {
         if(e.code() != boost::asio::error::operation_aborted &&
+           e.code() != boost::asio::error::interrupted &&
            e.code() != boost::asio::error::eof &&
            e.code() != boost::asio::error::connection_reset &&
            e.code() != boost::asio::error::connection_aborted)
