@@ -6,6 +6,8 @@
 #include <QDialog>
 #include <QWindow>
 #include <QVulkanInstance>
+#include <QTimer>
+#include <QSet>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <zstd.h>
@@ -18,6 +20,7 @@
 #include <set>
 #include <string_view>
 #include <iostream>
+#include <atomic>
 
 #ifdef _WIN32
   #include <winsock2.h>
@@ -25,41 +28,84 @@
   #include <arpa/inet.h>
 #endif
 
-std::deque<std::vector<uint8_t>> frameQueue;
-std::mutex queueMutex;
-
 struct ServerInfo {
     std::string address;
     std::string port;
 };
 
-std::vector<ServerInfo> discoverServers() {
+std::deque<std::vector<uint8_t>> frameQueue;
+std::mutex queueMutex;
+
+struct DiscoveredServer {
+    ServerInfo info;
+    std::chrono::steady_clock::time_point last_seen;
+};
+
+std::vector<DiscoveredServer> discoveredServers;
+std::mutex discoveryMutex;
+std::atomic_bool discoveryRun{true};
+
+void discoveryThreadFunc() {
     using udp = boost::asio::ip::udp;
     boost::asio::io_context ctx;
     udp::socket sock(ctx);
     sock.open(udp::v4());
+    sock.set_option(boost::asio::socket_base::reuse_address(true));
     sock.set_option(boost::asio::socket_base::broadcast(true));
+    // listen on the well-known discovery port so we can receive broadcast
+    // announcements from any servers
+    sock.bind(udp::endpoint(udp::v4(), 5001));
+
     udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
-    std::string msg = "DISCOVER_VKGRID_SERVER";
-    sock.send_to(boost::asio::buffer(msg), broadcast_ep);
+    auto next_ping = std::chrono::steady_clock::now();
     sock.non_blocking(true);
-    std::vector<ServerInfo> servers;
-    auto start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(2)) {
-        char buf[64];
+
+    while (discoveryRun.load()) {
+        std::array<char, 64> buf{};
         udp::endpoint sender;
         boost::system::error_code ec;
         size_t len = sock.receive_from(boost::asio::buffer(buf), sender, 0, ec);
         if (!ec && len > 0) {
-            std::string resp(buf, buf + len);
+            std::string msg(buf.data(), len);
             constexpr std::string_view prefix = "VKGRID_SERVER:";
-            if (resp.rfind(prefix, 0) == 0) {
-                std::string port = resp.substr(prefix.size());
-                servers.push_back({sender.address().to_string(), port});
+            if (msg.rfind(prefix, 0) == 0) {
+                std::string port = msg.substr(prefix.size());
+                auto now = std::chrono::steady_clock::now();
+                std::lock_guard<std::mutex> lk(discoveryMutex);
+                bool found = false;
+                for (auto& s : discoveredServers) {
+                    if (s.info.address == sender.address().to_string() && s.info.port == port) {
+                        s.last_seen = now;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    discoveredServers.push_back({{sender.address().to_string(), port}, now});
+                }
             }
         }
+
+        auto now = std::chrono::steady_clock::now();
+        if (now >= next_ping) {
+            std::string msg = "DISCOVER_VKGRID_SERVER";
+            sock.send_to(boost::asio::buffer(msg), broadcast_ep);
+            next_ping = now + std::chrono::seconds(1);
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(discoveryMutex);
+            auto it = discoveredServers.begin();
+            while (it != discoveredServers.end()) {
+                if (now - it->last_seen > std::chrono::seconds(5))
+                    it = discoveredServers.erase(it);
+                else
+                    ++it;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    return servers;
 }
 
 void networkThread(const std::string& host, const std::string& port) {
@@ -97,27 +143,55 @@ int main(int argc, char **argv){
     const uint32_t WIDTH=800, HEIGHT=600;
     QApplication app(argc, argv);
 
-    auto servers = discoverServers();
-    if(servers.empty()) {
-        std::cout << "No servers found" << std::endl;
-        return 0;
-    }
+    std::thread(discoveryThreadFunc).detach();
 
     // Qt dialog for server selection
     QDialog dlg;
     QVBoxLayout vlayout(&dlg);
     QListWidget list;
-    for(const auto& s : servers)
-        list.addItem(QString::fromStdString(s.address+":"+s.port));
     vlayout.addWidget(&list);
     QPushButton btn("Connect");
     vlayout.addWidget(&btn);
     QObject::connect(&btn, &QPushButton::clicked, &dlg, &QDialog::accept);
-    if(dlg.exec()!=QDialog::Accepted || list.currentRow()<0)
-        return 0;
-    size_t idx = static_cast<size_t>(list.currentRow());
 
-    std::thread(networkThread, servers[idx].address, servers[idx].port).detach();
+    QTimer timer;
+    QObject::connect(&timer, &QTimer::timeout, [&](){
+        std::lock_guard<std::mutex> lk(discoveryMutex);
+        QSet<QString> current;
+        for(const auto& s : discoveredServers){
+            QString text = QString::fromStdString(s.info.address+":"+s.info.port);
+            current.insert(text);
+            if(list.findItems(text, Qt::MatchExactly).isEmpty())
+                list.addItem(text);
+        }
+
+        for(int i=0;i<list.count();){
+            if(!current.contains(list.item(i)->text())){
+                delete list.takeItem(i);
+            } else {
+                ++i;
+            }
+        }
+    });
+    timer.start(500);
+
+    if(dlg.exec()!=QDialog::Accepted || list.currentRow()<0){
+        discoveryRun = false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        return 0;
+    }
+
+    discoveryRun = false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    size_t idx = static_cast<size_t>(list.currentRow());
+    ServerInfo chosen;
+    {
+        std::lock_guard<std::mutex> lk(discoveryMutex);
+        if(idx >= discoveredServers.size()) return 0;
+        chosen = discoveredServers[idx].info;
+    }
+
+    std::thread(networkThread, chosen.address, chosen.port).detach();
 
     // Qt Vulkan window
     QVulkanInstance qInst;

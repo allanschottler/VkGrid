@@ -180,16 +180,33 @@ void discoveryThread(unsigned short port) {
     udp::socket sock(ctx);
     sock.open(udp::v4());
     sock.set_option(boost::asio::socket_base::reuse_address(true));
+    sock.set_option(boost::asio::socket_base::broadcast(true));
     sock.bind(udp::endpoint(udp::v4(), 5001));
+
+    udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
+    auto next_announce = std::chrono::steady_clock::now();
+
+    sock.non_blocking(true);
     for (;;) {
         std::array<char, 64> buf{};
         udp::endpoint sender;
-        size_t len = sock.receive_from(boost::asio::buffer(buf), sender);
-        std::string msg(buf.data(), len);
-        if (msg == "DISCOVER_VKGRID_SERVER") {
-            std::string resp = "VKGRID_SERVER:" + std::to_string(port);
-            sock.send_to(boost::asio::buffer(resp), sender);
+        boost::system::error_code ec;
+        size_t len = sock.receive_from(boost::asio::buffer(buf), sender, 0, ec);
+        if (!ec && len > 0) {
+            std::string msg(buf.data(), len);
+            if (msg == "DISCOVER_VKGRID_SERVER") {
+                std::string resp = "VKGRID_SERVER:" + std::to_string(port);
+                sock.send_to(boost::asio::buffer(resp), broadcast_ep);
+            }
         }
+
+        auto now = std::chrono::steady_clock::now();
+        if (now >= next_announce) {
+            std::string resp = "VKGRID_SERVER:" + std::to_string(port);
+            sock.send_to(boost::asio::buffer(resp), broadcast_ep);
+            next_announce = now + std::chrono::seconds(2);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
