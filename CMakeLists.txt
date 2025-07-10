@@ -6,30 +6,39 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 add_compile_options(-Wall)
 
-find_package(Vulkan REQUIRED)
-find_package(glfw3 REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system json)
-find_package(zstd CONFIG)
+# On Windows, pick a modern WinNT version before any Qt/Windows includes:
+# if (WIN32)
+#   add_compile_definitions(_WIN32_WINNT=0x0A00)   # target Win10 or adjust as needed
+# endif()
 
-include_directories(include)
+find_package(Vulkan REQUIRED)
+find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Widgets Gui)
+find_package(zstd CONFIG)
+find_package(Boost REQUIRED COMPONENTS system json)
+
+# Enable Qt’s automoc/uic/etc so Qt headers + moc work:
+set(CMAKE_AUTOMOC  ON)
+set(CMAKE_AUTORCC  ON)
+set(CMAKE_AUTOUIC  ON)
 
 add_executable(vkgrid_server vkgrid_server.cpp)
 target_link_libraries(vkgrid_server
     PRIVATE
       Vulkan::Vulkan
+      Qt6::Core
       Boost::system
       Boost::json
-      zstd
 )
 
 add_executable(vkgrid_client vkgrid_client.cpp)
 target_link_libraries(vkgrid_client
     PRIVATE
       Vulkan::Vulkan
-      glfw
+      Qt6::Widgets
+      Qt6::Gui
+      Qt6::Core
       Boost::system
       Boost::json
-      zstd
 )
 
 if(WIN32)

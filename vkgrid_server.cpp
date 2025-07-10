@@ -200,7 +200,7 @@ void session(tcp::socket sock) {
 
     try {
         while (true) {
-            auto pixels = gfx.renderFrame(t);
+           auto pixels = gfx.renderFrame(t);
             t += 0.016f;
             uint32_t orig = pixels.size();
             size_t maxC = ZSTD_compressBound(orig);

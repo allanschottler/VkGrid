@@ -1,8 +1,15 @@
 #include <vulkan/vulkan.hpp>
-#include <GLFW/glfw3.h>
+#include <QApplication>
+#include <QListWidget>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QDialog>
+#include <QWindow>
+#include <QVulkanInstance>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <zstd.h>
+
 #include <thread>
 #include <mutex>
 #include <chrono>
@@ -85,51 +92,58 @@ void networkThread(const std::string& host, const std::string& port) {
     std::cout << "[Client] Disconnected from " << host << ":" << port << "\n";
 }
 
-int main(){
+int main(int argc, char **argv){
+    std::cout << "VkGrid Remote Client\n";
     const uint32_t WIDTH=800, HEIGHT=600;
+    QApplication app(argc, argv);
+
     auto servers = discoverServers();
     if(servers.empty()) {
         std::cout << "No servers found" << std::endl;
         return 0;
     }
-    std::cout << "Available servers:" << std::endl;
-    for(size_t i=0;i<servers.size();++i) {
-        std::cout << i << ": " << servers[i].address << ":" << servers[i].port << std::endl;
-    }
-    std::cout << "Select server index: ";
-    size_t idx=0;
-    std::cin >> idx;
-    if(idx>=servers.size()) {
-        std::cout << "Invalid selection" << std::endl;
+
+    // Qt dialog for server selection
+    QDialog dlg;
+    QVBoxLayout vlayout(&dlg);
+    QListWidget list;
+    for(const auto& s : servers)
+        list.addItem(QString::fromStdString(s.address+":"+s.port));
+    vlayout.addWidget(&list);
+    QPushButton btn("Connect");
+    vlayout.addWidget(&btn);
+    QObject::connect(&btn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    if(dlg.exec()!=QDialog::Accepted || list.currentRow()<0)
         return 0;
-    }
+    size_t idx = static_cast<size_t>(list.currentRow());
+
     std::thread(networkThread, servers[idx].address, servers[idx].port).detach();
 
-    // GLFW + Vulkan
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(WIDTH,HEIGHT,"Remote Client",nullptr,nullptr);
+    // Qt Vulkan window
+    QVulkanInstance qInst;
+    if(!qInst.create()) {
+        std::cout << "Failed to create QVulkanInstance" << std::endl;
+        return 0;
+    }
 
-    uint32_t extCount=0;
-    auto reqExt = glfwGetRequiredInstanceExtensions(&extCount);
-    std::vector<const char*> extensions(reqExt, reqExt+extCount);
-    vk::UniqueInstance instance = vk::createInstanceUnique({
-        {}, nullptr, 0,nullptr,
-        (uint32_t)extensions.size(), extensions.data()
-    });
+    QWindow window;
+    window.setSurfaceType(QSurface::VulkanSurface);
+    window.setVulkanInstance(&qInst);
+    window.resize(WIDTH, HEIGHT);
+    window.setTitle("Remote Client");
+    window.show();
 
-    VkSurfaceKHR rawSurf;
-    glfwCreateWindowSurface(instance.get(), window, nullptr, &rawSurf);
-    vk::UniqueSurfaceKHR surface{rawSurf, instance.get()};
+    vk::Instance instance(qInst.vkInstance());
+    vk::SurfaceKHR surface(qInst.surfaceForWindow(&window));
 
-    auto physList = instance->enumeratePhysicalDevices();
+    auto physList = instance.enumeratePhysicalDevices();
     auto phys     = physList.front();
     auto qProps   = phys.getQueueFamilyProperties();
 
     int gfxFamI=-1, presFamI=-1;
     for (int i=0;i<(int)qProps.size();++i) {
         if (qProps[i].queueFlags & vk::QueueFlagBits::eGraphics) gfxFamI=i;
-        if (phys.getSurfaceSupportKHR(i,*surface)) presFamI=i;
+        if (phys.getSurfaceSupportKHR(i,surface)) presFamI=i;
     }
     uint32_t gfxFam = uint32_t(gfxFamI),
              presFam= uint32_t(presFamI);
@@ -156,12 +170,12 @@ int main(){
         device->createCommandPoolUnique({{},gfxFam});
 
     // Swapchain
-    auto caps    = phys.getSurfaceCapabilitiesKHR(*surface);
-    auto formats= phys.getSurfaceFormatsKHR(*surface);
+    auto caps    = phys.getSurfaceCapabilitiesKHR(surface);
+    auto formats= phys.getSurfaceFormatsKHR(surface);
     vk::SurfaceFormatKHR surfFmt = formats.front();
     vk::Extent2D extent{WIDTH,HEIGHT};
     vk::UniqueSwapchainKHR swapchain = device->createSwapchainKHRUnique({
-        {}, *surface,
+        {}, surface,
         caps.minImageCount,
         surfFmt.format, surfFmt.colorSpace,
         extent, 1,
@@ -198,8 +212,8 @@ int main(){
     auto renderDone = device->createSemaphoreUnique(sci);
 
     // Main loop
-    while(!glfwWindowShouldClose(window)){
-        glfwPollEvents();
+    while(window.isVisible()){
+        app.processEvents();
 
         std::vector<uint8_t> pixels;
         {
@@ -294,7 +308,5 @@ int main(){
         device->waitIdle();
     }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
     return 0;
 }
