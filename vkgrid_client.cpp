@@ -5,10 +5,12 @@
 #include "vulkan_window.h"
 #include <QApplication>
 #include <csignal>
-#include <iostream>
+#include <boost/log/trivial.hpp>
+#include "logging.h"
 
 int main(int argc, char **argv) {
-    std::cout << "VkGrid Remote Client" << std::endl;
+    init_logging("Client");
+    BOOST_LOG_TRIVIAL(info) << "VkGrid Remote Client";
     QApplication app(argc, argv);
 
     DiscoveryWindow dlg;
