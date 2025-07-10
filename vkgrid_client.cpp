@@ -51,7 +51,9 @@ void discoveryThreadFunc() {
     sock.open(udp::v4());
     sock.set_option(boost::asio::socket_base::reuse_address(true));
     sock.set_option(boost::asio::socket_base::broadcast(true));
-    sock.bind(udp::endpoint(udp::v4(), 0));
+    // listen on the well-known discovery port so we can receive broadcast
+    // announcements from any servers
+    sock.bind(udp::endpoint(udp::v4(), 5001));
 
     udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
     auto next_ping = std::chrono::steady_clock::now();
