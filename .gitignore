@@ -1,2 +1,15 @@
+# Build directories and temporary files
 /build
-/CMakeUserPresets.json
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CMakeUserPresets.json
+
+# Visual Studio artifacts
+*.sln
+*.vcxproj
+*.vcxproj.filters
+
+# Development environment settings
+.vscode/
+.qt/

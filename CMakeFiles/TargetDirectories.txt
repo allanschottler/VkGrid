@@ -1,4 +1,0 @@
-D:/VkGrid/CMakeFiles/vkgrid_server.dir
-D:/VkGrid/CMakeFiles/vkgrid_client.dir
-D:/VkGrid/CMakeFiles/ALL_BUILD.dir
-D:/VkGrid/CMakeFiles/ZERO_CHECK.dir
