@@ -239,6 +239,11 @@ void session(tcp::socket sock) {
             boost::asio::write(sock, boost::asio::buffer(cbuf.data(), csize));
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
+    } catch (const boost::system::system_error& e) {
+        if(e.code() != boost::asio::error::operation_aborted &&
+           e.code() != boost::asio::error::eof &&
+           e.code() != boost::asio::error::connection_reset)
+            std::cerr << "Session error: " << e.what() << '\n';
     } catch (const std::exception& e) {
         std::cerr << "Session error: " << e.what() << '\n';
     }

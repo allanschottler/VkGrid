@@ -51,8 +51,8 @@ std::atomic_bool clientRunning{true};
 void handleSignal(int){
     discoveryRun = false;
     clientRunning.store(false);
-    if(globalSock)
-        globalSock->close();
+    if(globalSock && globalSock->is_open())
+        globalSock->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
 }
 
 void discoveryThreadFunc() {
@@ -124,7 +124,7 @@ void networkThread(std::shared_ptr<boost::asio::ip::tcp::socket> sock,
     std::cout << "[Client] Connected to " << host << ":" << port << "\n";
 
     try {
-        while (sock->is_open()) {
+        while (clientRunning.load() && sock->is_open()) {
         uint32_t norig, nc;
         boost::asio::read(*sock, boost::asio::buffer(&norig, 4));
         boost::asio::read(*sock, boost::asio::buffer(&nc,    4));
@@ -143,6 +143,11 @@ void networkThread(std::shared_ptr<boost::asio::ip::tcp::socket> sock,
         std::lock_guard<std::mutex> lk(queueMutex);
         frameQueue.push_back(std::move(pixels));
         }
+    } catch(const boost::system::system_error& e) {
+        if(e.code() != boost::asio::error::operation_aborted &&
+           e.code() != boost::asio::error::eof &&
+           e.code() != boost::asio::error::connection_reset)
+            std::cerr << "[Client] network error: " << e.what() << '\n';
     } catch(const std::exception& e) {
         std::cerr << "[Client] network error: " << e.what() << '\n';
     }
