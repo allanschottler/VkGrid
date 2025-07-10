@@ -9,6 +9,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <zstd.h>
+
 #include <thread>
 #include <mutex>
 #include <chrono>
@@ -92,6 +93,7 @@ void networkThread(const std::string& host, const std::string& port) {
 }
 
 int main(int argc, char **argv){
+    std::cout << "VkGrid Remote Client\n";
     const uint32_t WIDTH=800, HEIGHT=600;
     QApplication app(argc, argv);
 

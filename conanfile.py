@@ -1,12 +1,12 @@
 from conan import ConanFile
-from conan.tools.cmake import CMake, cmake_layout
+from conan.tools.cmake import CMake, cmake_layout, CMakeToolchain
 
 class Conan(ConanFile):
     name = "vkgrid"
     version = "1.0"
     license = "MIT"
     author = "Allan Schöttler"
-    # url = "https://github.com/allanschottler/VkGrid"
+    url = "https://github.com/allanschottler/VkGrid"
     description = "Vulkan Grid"
     topics = ("Vulkan", "C++")
     
@@ -17,15 +17,19 @@ class Conan(ConanFile):
         "include/*",
     ]
 
-    requires = [
-        #"vkeng/1.0@me/dev",
-        "vulkan-headers/1.4.309.0",
-        "vulkan-loader/1.4.309.0",
-        "zstd/1.5.7",
-        "qt/6.5.3",
-        "boost/1.85.0",
-    ]
-    
+    def requirements(self):
+        self.requires("qt/6.8.3", options={
+            "gui": True,
+            "widgets": True,
+            "with_vulkan": True,
+            "with_zstd": True,
+            "shared": True
+        })
+        self.requires("vulkan-loader/1.3.239.0")
+        self.requires("vulkan-headers/1.3.239.0")
+        self.requires("boost/1.85.0")
+        self.requires("zstd/1.5.5")
+
     def configure(self):
         pass
 
@@ -40,7 +44,4 @@ class Conan(ConanFile):
     def package(self):
         cmake = CMake(self)
         cmake.install()
-
-    def package_info(self):
-        self.cpp_info.includedirs = ["include"]
     
