@@ -6,6 +6,7 @@
 #include <boost/log/utility/setup/common_attributes.hpp>
 #include <boost/log/sinks/async_frontend.hpp>
 #include <boost/log/sinks/text_ostream_backend.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/core/null_deleter.hpp>
