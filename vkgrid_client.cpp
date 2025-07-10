@@ -5,6 +5,7 @@
 #include <QVBoxLayout>
 #include <QDialog>
 #include <QWindow>
+#include <QCloseEvent>
 #include <QVulkanInstance>
 #include <QTimer>
 #include <QSet>
@@ -47,6 +48,18 @@ std::mutex discoveryMutex;
 std::atomic_bool discoveryRun{true};
 std::shared_ptr<boost::asio::ip::tcp::socket> globalSock;
 std::atomic_bool clientRunning{true};
+
+void handleSignal(int);
+
+class ClosingWindow : public QWindow {
+public:
+    using QWindow::QWindow;
+protected:
+    void closeEvent(QCloseEvent* ev) override {
+        handleSignal(0);
+        QWindow::closeEvent(ev);
+    }
+};
 
 void handleSignal(int){
     discoveryRun = false;
@@ -232,7 +245,7 @@ int main(int argc, char **argv){
         return 0;
     }
 
-    QWindow window;
+    ClosingWindow window;
     window.setSurfaceType(QSurface::VulkanSurface);
     window.setVulkanInstance(&qInst);
     window.resize(WIDTH, HEIGHT);
