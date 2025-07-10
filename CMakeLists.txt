@@ -14,11 +14,9 @@ add_compile_options(-Wall)
 find_package(Vulkan REQUIRED)
 find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Widgets Gui)
 find_package(zstd CONFIG)
-find_package(Boost REQUIRED COMPONENTS system json log log_setup)
+find_package(Boost REQUIRED COMPONENTS system json log thread)
 
-if(WIN32)
-  add_compile_definitions(BOOST_ALL_DYN_LINK)
-endif()
+
 
 # Enable Qt’s automoc/uic/etc so Qt headers + moc work:
 set(CMAKE_AUTOMOC  ON)
@@ -33,7 +31,7 @@ target_link_libraries(vkgrid_server
       Boost::system
       Boost::json
       Boost::log
-      Boost::log_setup
+      Boost::thread
 )
 
 add_executable(vkgrid_client
@@ -50,7 +48,7 @@ target_link_libraries(vkgrid_client
       Boost::system
       Boost::json
       Boost::log
-      Boost::log_setup
+      Boost::thread
 )
 
 if(WIN32)
