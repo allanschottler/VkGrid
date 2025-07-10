@@ -30,7 +30,11 @@ target_link_libraries(vkgrid_server
       Boost::json
 )
 
-add_executable(vkgrid_client vkgrid_client.cpp)
+add_executable(vkgrid_client
+    vkgrid_client.cpp
+    discovery_window.h
+    vulkan_window.h
+)
 target_link_libraries(vkgrid_client
     PRIVATE
       Vulkan::Vulkan
