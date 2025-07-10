@@ -16,6 +16,8 @@ find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Widgets Gui)
 find_package(zstd CONFIG)
 find_package(Boost REQUIRED COMPONENTS system json log thread)
 
+add_compile_definitions(BOOST_ALL_DYN_LINK)
+
 
 
 # Enable Qt’s automoc/uic/etc so Qt headers + moc work:
