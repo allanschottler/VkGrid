@@ -43,7 +43,7 @@ private:
     QTimer m_timer;
 
     std::vector<DiscoveredServer> m_discovered;
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex;
     std::atomic_bool m_running{true};
     std::thread m_thread;
 };
