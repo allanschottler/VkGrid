@@ -5,6 +5,7 @@
 #include <QVBoxLayout>
 #include <QDialog>
 #include <QWindow>
+#include <QCloseEvent>
 #include <QVulkanInstance>
 #include <QTimer>
 #include <QSet>
@@ -21,6 +22,7 @@
 #include <string_view>
 #include <iostream>
 #include <atomic>
+#include <csignal>
 
 #ifdef _WIN32
   #include <winsock2.h>
@@ -44,6 +46,30 @@ struct DiscoveredServer {
 std::vector<DiscoveredServer> discoveredServers;
 std::mutex discoveryMutex;
 std::atomic_bool discoveryRun{true};
+std::shared_ptr<boost::asio::ip::tcp::socket> globalSock;
+std::atomic_bool clientRunning{true};
+
+void handleSignal(int);
+
+class ClosingWindow : public QWindow {
+public:
+    using QWindow::QWindow;
+protected:
+    void closeEvent(QCloseEvent* ev) override {
+        handleSignal(0);
+        QWindow::closeEvent(ev);
+    }
+};
+
+void handleSignal(int){
+    discoveryRun = false;
+    clientRunning.store(false);
+    if(globalSock && globalSock->is_open()){
+        boost::system::error_code ec;
+        globalSock->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+        globalSock->close(ec);
+    }
+}
 
 void discoveryThreadFunc() {
     using udp = boost::asio::ip::udp;
@@ -108,21 +134,20 @@ void discoveryThreadFunc() {
     }
 }
 
-void networkThread(const std::string& host, const std::string& port) {
+void networkThread(std::shared_ptr<boost::asio::ip::tcp::socket> sock,
+                   const std::string& host, const std::string& port) {
     using tcp = boost::asio::ip::tcp;
-    boost::asio::io_context ctx;
-    tcp::socket sock(ctx);
-    boost::asio::connect(sock, tcp::resolver(ctx).resolve(host, port));
     std::cout << "[Client] Connected to " << host << ":" << port << "\n";
 
-    while (true) {
+    try {
+        while (clientRunning.load() && sock->is_open()) {
         uint32_t norig, nc;
-        boost::asio::read(sock, boost::asio::buffer(&norig, 4));
-        boost::asio::read(sock, boost::asio::buffer(&nc,    4));
+        boost::asio::read(*sock, boost::asio::buffer(&norig, 4));
+        boost::asio::read(*sock, boost::asio::buffer(&nc,    4));
         uint32_t orig = ntohl(norig), csize = ntohl(nc);
 
         std::vector<char> cbuf(csize);
-        boost::asio::read(sock, boost::asio::buffer(cbuf));
+        boost::asio::read(*sock, boost::asio::buffer(cbuf));
         std::vector<uint8_t> pixels(orig);
         size_t dsize = ZSTD_decompress(pixels.data(), orig,
                                        cbuf.data(), csize);
@@ -133,8 +158,27 @@ void networkThread(const std::string& host, const std::string& port) {
 
         std::lock_guard<std::mutex> lk(queueMutex);
         frameQueue.push_back(std::move(pixels));
+        }
+    } catch(const boost::system::system_error& e) {
+        if(e.code() != boost::asio::error::operation_aborted &&
+           e.code() != boost::asio::error::interrupted &&
+           e.code() != boost::asio::error::eof &&
+           e.code() != boost::asio::error::connection_reset &&
+           e.code() != boost::asio::error::connection_aborted)
+            std::cerr << "[Client] network error: " << e.what() << '\n';
+        clientRunning.store(false);
+    } catch(const std::exception& e) {
+        std::cerr << "[Client] network error: " << e.what() << '\n';
+        clientRunning.store(false);
     }
 
+    clientRunning.store(false);
+
+    boost::system::error_code ec;
+    if(sock->is_open()) {
+        sock->shutdown(tcp::socket::shutdown_both, ec);
+        sock->close(ec);
+    }
     std::cout << "[Client] Disconnected from " << host << ":" << port << "\n";
 }
 
@@ -143,7 +187,7 @@ int main(int argc, char **argv){
     const uint32_t WIDTH=800, HEIGHT=600;
     QApplication app(argc, argv);
 
-    std::thread(discoveryThreadFunc).detach();
+    std::thread discoverThread(discoveryThreadFunc);
 
     // Qt dialog for server selection
     QDialog dlg;
@@ -177,12 +221,12 @@ int main(int argc, char **argv){
 
     if(dlg.exec()!=QDialog::Accepted || list.currentRow()<0){
         discoveryRun = false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        discoverThread.join();
         return 0;
     }
 
     discoveryRun = false;
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    discoverThread.join();
     size_t idx = static_cast<size_t>(list.currentRow());
     ServerInfo chosen;
     {
@@ -191,7 +235,13 @@ int main(int argc, char **argv){
         chosen = discoveredServers[idx].info;
     }
 
-    std::thread(networkThread, chosen.address, chosen.port).detach();
+    boost::asio::io_context ctx;
+    globalSock = std::make_shared<boost::asio::ip::tcp::socket>(ctx);
+    boost::asio::connect(*globalSock,
+        boost::asio::ip::tcp::resolver(ctx).resolve(chosen.address, chosen.port));
+
+    signal(SIGINT, handleSignal);
+    std::thread netThread(networkThread, globalSock, chosen.address, chosen.port);
 
     // Qt Vulkan window
     QVulkanInstance qInst;
@@ -200,7 +250,7 @@ int main(int argc, char **argv){
         return 0;
     }
 
-    QWindow window;
+    ClosingWindow window;
     window.setSurfaceType(QSurface::VulkanSurface);
     window.setVulkanInstance(&qInst);
     window.resize(WIDTH, HEIGHT);
@@ -286,8 +336,10 @@ int main(int argc, char **argv){
     auto renderDone = device->createSemaphoreUnique(sci);
 
     // Main loop
-    while(window.isVisible()){
+    while(window.isVisible() && clientRunning.load()){
         app.processEvents();
+        if(!clientRunning.load())
+            window.close();
 
         std::vector<uint8_t> pixels;
         {
@@ -381,6 +433,15 @@ int main(int argc, char **argv){
         // ensure GPU done before cmdBuffers destroy
         device->waitIdle();
     }
+
+    clientRunning.store(false);
+
+    if(globalSock && globalSock->is_open()){
+        boost::system::error_code ec;
+        globalSock->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+        globalSock->close(ec);
+    }
+    netThread.join();
 
     return 0;
 }

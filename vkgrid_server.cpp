@@ -8,9 +8,17 @@
 #include <thread>
 #include <iostream>
 #include <cmath>
+#include <csignal>
+#include <atomic>
 
 using tcp = boost::asio::ip::tcp;
 using udp = boost::asio::ip::udp;
+
+std::atomic_bool serverRunning{true};
+
+void handleSignal(int){
+    serverRunning.store(false);
+}
 
 struct VulkanOffscreen {
     vk::UniqueInstance      instance;
@@ -187,7 +195,7 @@ void discoveryThread(unsigned short port) {
     auto next_announce = std::chrono::steady_clock::now();
 
     sock.non_blocking(true);
-    for (;;) {
+    while (serverRunning.load()) {
         std::array<char, 64> buf{};
         udp::endpoint sender;
         boost::system::error_code ec;
@@ -208,6 +216,7 @@ void discoveryThread(unsigned short port) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    sock.close();
 }
 
 void session(tcp::socket sock) {
@@ -216,7 +225,7 @@ void session(tcp::socket sock) {
     std::cout << "[Server] New session started from " << sock.remote_endpoint() << '\n';
 
     try {
-        while (true) {
+        while (serverRunning.load() && sock.is_open()) {
            auto pixels = gfx.renderFrame(t);
             t += 0.016f;
             uint32_t orig = pixels.size();
@@ -230,13 +239,21 @@ void session(tcp::socket sock) {
             boost::asio::write(sock, boost::asio::buffer(cbuf.data(), csize));
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
+    } catch (const boost::system::system_error& e) {
+        if(e.code() != boost::asio::error::operation_aborted &&
+           e.code() != boost::asio::error::interrupted &&
+           e.code() != boost::asio::error::eof &&
+           e.code() != boost::asio::error::connection_reset &&
+           e.code() != boost::asio::error::connection_aborted)
+            std::cerr << "Session error: " << e.what() << '\n';
     } catch (const std::exception& e) {
         std::cerr << "Session error: " << e.what() << '\n';
     }
 
     std::cout << "[Server] Session ended for " << sock.remote_endpoint() << '\n';
-    sock.shutdown(tcp::socket::shutdown_both); 
-    sock.close();
+    boost::system::error_code ec;
+    sock.shutdown(tcp::socket::shutdown_both, ec);
+    sock.close(ec);
 }
 
 int main(int argc, char* argv[]) {
@@ -245,15 +262,33 @@ int main(int argc, char* argv[]) {
         port = static_cast<unsigned short>(std::stoi(argv[1]));
     }
 
-    std::thread(discoveryThread, port).detach();
+    signal(SIGINT, handleSignal);
+
+    std::thread dThread(discoveryThread, port);
     boost::asio::io_context ctx;
     tcp::acceptor acceptor(ctx, {tcp::v4(), port});
+    acceptor.non_blocking(true);
     std::cout << "[Server] Listening on port " << port << "\n";
     std::cout << "[Server] Discovery on UDP port 5001\n";
-    while (true) {
+    while (serverRunning.load()) {
         tcp::socket sock(ctx);
-        acceptor.accept(sock);
+        boost::system::error_code ec;
+        acceptor.accept(sock, ec);
+        if(ec) {
+            if(ec == boost::asio::error::would_block) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+            else {
+                std::cerr << "Accept error: " << ec.message() << "\n";
+                break;
+            }
+        }
         std::thread(session, std::move(sock)).detach();
     }
+    acceptor.close();
+    serverRunning.store(false);
+    dThread.join();
+    std::cout << "[Server] Shutting down" << std::endl;
     return 0;
 }
