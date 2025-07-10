@@ -8,13 +8,12 @@
 #include <thread>
 #include <iostream>
 #include <cmath>
-#include <atomic>
 #include <csignal>
 
 using tcp = boost::asio::ip::tcp;
 using udp = boost::asio::ip::udp;
 
-std::atomic_bool serverRunning{true};
+bool serverRunning = true;
 
 void handleSignal(int){
     serverRunning = false;
@@ -257,7 +256,7 @@ int main(int argc, char* argv[]) {
 
     signal(SIGINT, handleSignal);
 
-    std::thread(discoveryThread, port).detach();
+    std::thread dThread(discoveryThread, port);
     boost::asio::io_context ctx;
     tcp::acceptor acceptor(ctx, {tcp::v4(), port});
     acceptor.non_blocking(true);
@@ -280,6 +279,8 @@ int main(int argc, char* argv[]) {
         std::thread(session, std::move(sock)).detach();
     }
     acceptor.close();
+    serverRunning = false;
+    dThread.join();
     std::cout << "[Server] Shutting down" << std::endl;
     return 0;
 }

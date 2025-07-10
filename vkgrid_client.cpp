@@ -45,11 +45,12 @@ struct DiscoveredServer {
 std::vector<DiscoveredServer> discoveredServers;
 std::mutex discoveryMutex;
 std::atomic_bool discoveryRun{true};
-std::atomic_bool networkRun{true};
+std::shared_ptr<boost::asio::ip::tcp::socket> globalSock;
 
 void handleSignal(int){
     discoveryRun = false;
-    networkRun = false;
+    if(globalSock)
+        globalSock->close();
 }
 
 void discoveryThreadFunc() {
@@ -115,22 +116,20 @@ void discoveryThreadFunc() {
     }
 }
 
-void networkThread(const std::string& host, const std::string& port, std::atomic_bool& run) {
+void networkThread(std::shared_ptr<boost::asio::ip::tcp::socket> sock,
+                   const std::string& host, const std::string& port) {
     using tcp = boost::asio::ip::tcp;
-    boost::asio::io_context ctx;
-    tcp::socket sock(ctx);
-    boost::asio::connect(sock, tcp::resolver(ctx).resolve(host, port));
     std::cout << "[Client] Connected to " << host << ":" << port << "\n";
 
     try {
-        while (run.load()) {
+        while (sock->is_open()) {
         uint32_t norig, nc;
-        boost::asio::read(sock, boost::asio::buffer(&norig, 4));
-        boost::asio::read(sock, boost::asio::buffer(&nc,    4));
+        boost::asio::read(*sock, boost::asio::buffer(&norig, 4));
+        boost::asio::read(*sock, boost::asio::buffer(&nc,    4));
         uint32_t orig = ntohl(norig), csize = ntohl(nc);
 
         std::vector<char> cbuf(csize);
-        boost::asio::read(sock, boost::asio::buffer(cbuf));
+        boost::asio::read(*sock, boost::asio::buffer(cbuf));
         std::vector<uint8_t> pixels(orig);
         size_t dsize = ZSTD_decompress(pixels.data(), orig,
                                        cbuf.data(), csize);
@@ -147,8 +146,10 @@ void networkThread(const std::string& host, const std::string& port, std::atomic
     }
 
     boost::system::error_code ec;
-    sock.shutdown(tcp::socket::shutdown_both, ec);
-    sock.close(ec);
+    if(sock->is_open()) {
+        sock->shutdown(tcp::socket::shutdown_both, ec);
+        sock->close(ec);
+    }
     std::cout << "[Client] Disconnected from " << host << ":" << port << "\n";
 }
 
@@ -205,8 +206,13 @@ int main(int argc, char **argv){
         chosen = discoveredServers[idx].info;
     }
 
+    boost::asio::io_context ctx;
+    globalSock = std::make_shared<boost::asio::ip::tcp::socket>(ctx);
+    boost::asio::connect(*globalSock,
+        boost::asio::ip::tcp::resolver(ctx).resolve(chosen.address, chosen.port));
+
     signal(SIGINT, handleSignal);
-    std::thread netThread(networkThread, chosen.address, chosen.port, std::ref(networkRun));
+    std::thread netThread(networkThread, globalSock, chosen.address, chosen.port);
 
     // Qt Vulkan window
     QVulkanInstance qInst;
@@ -397,7 +403,11 @@ int main(int argc, char **argv){
         device->waitIdle();
     }
 
-    networkRun = false;
+    if(globalSock && globalSock->is_open()){
+        boost::system::error_code ec;
+        globalSock->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+        globalSock->close(ec);
+    }
     netThread.join();
 
     return 0;
