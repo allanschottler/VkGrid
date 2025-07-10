@@ -64,8 +64,11 @@ protected:
 void handleSignal(int){
     discoveryRun = false;
     clientRunning.store(false);
-    if(globalSock && globalSock->is_open())
-        globalSock->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
+    if(globalSock && globalSock->is_open()){
+        boost::system::error_code ec;
+        globalSock->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+        globalSock->close(ec);
+    }
 }
 
 void discoveryThreadFunc() {
@@ -159,7 +162,8 @@ void networkThread(std::shared_ptr<boost::asio::ip::tcp::socket> sock,
     } catch(const boost::system::system_error& e) {
         if(e.code() != boost::asio::error::operation_aborted &&
            e.code() != boost::asio::error::eof &&
-           e.code() != boost::asio::error::connection_reset)
+           e.code() != boost::asio::error::connection_reset &&
+           e.code() != boost::asio::error::connection_aborted)
             std::cerr << "[Client] network error: " << e.what() << '\n';
         clientRunning.store(false);
     } catch(const std::exception& e) {
