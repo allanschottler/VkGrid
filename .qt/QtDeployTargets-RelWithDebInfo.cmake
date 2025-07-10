@@ -1,6 +1,0 @@
-set(__QT_DEPLOY_TARGET_vkgrid_server_FILE D:/VkGrid/RelWithDebInfo/vkgrid_server.exe)
-set(__QT_DEPLOY_TARGET_vkgrid_server_TYPE EXECUTABLE)
-set(__QT_DEPLOY_TARGET_vkgrid_server_RUNTIME_DLLS )
-set(__QT_DEPLOY_TARGET_vkgrid_client_FILE D:/VkGrid/RelWithDebInfo/vkgrid_client.exe)
-set(__QT_DEPLOY_TARGET_vkgrid_client_TYPE EXECUTABLE)
-set(__QT_DEPLOY_TARGET_vkgrid_client_RUNTIME_DLLS )
