@@ -7,6 +7,7 @@
 #include <QWindow>
 #include <QVulkanInstance>
 #include <QTimer>
+#include <QSet>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <zstd.h>
@@ -96,7 +97,7 @@ void discoveryThreadFunc() {
             std::lock_guard<std::mutex> lk(discoveryMutex);
             auto it = discoveredServers.begin();
             while (it != discoveredServers.end()) {
-                if (now - it->last_seen > std::chrono::seconds(3))
+                if (now - it->last_seen > std::chrono::seconds(5))
                     it = discoveredServers.erase(it);
                 else
                     ++it;
@@ -156,9 +157,21 @@ int main(int argc, char **argv){
     QTimer timer;
     QObject::connect(&timer, &QTimer::timeout, [&](){
         std::lock_guard<std::mutex> lk(discoveryMutex);
-        list.clear();
-        for(const auto& s : discoveredServers)
-            list.addItem(QString::fromStdString(s.info.address+":"+s.info.port));
+        QSet<QString> current;
+        for(const auto& s : discoveredServers){
+            QString text = QString::fromStdString(s.info.address+":"+s.info.port);
+            current.insert(text);
+            if(list.findItems(text, Qt::MatchExactly).isEmpty())
+                list.addItem(text);
+        }
+
+        for(int i=0;i<list.count();){
+            if(!current.contains(list.item(i)->text())){
+                delete list.takeItem(i);
+            } else {
+                ++i;
+            }
+        }
     });
     timer.start(500);
 
