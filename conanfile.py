@@ -16,6 +16,9 @@ class Conan(ConanFile):
         "CMakeLists.txt",
         "include/*",
     ]
+    default_options = {
+        "boost/1.85.0:shared": True
+    }
 
     def requirements(self):
         self.requires("qt/6.8.3", options={
@@ -27,7 +30,9 @@ class Conan(ConanFile):
         })
         self.requires("vulkan-loader/1.3.239.0")
         self.requires("vulkan-headers/1.3.239.0")
-        self.requires("boost/1.85.0")
+        self.requires("boost/1.85.0", options={
+            "shared": True
+        })
         self.requires("zstd/1.5.5")
 
     def configure(self):
