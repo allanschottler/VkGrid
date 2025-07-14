@@ -7,7 +7,8 @@
 #include <array>
 #include <chrono>
 #include <thread>
-#include <iostream>
+#include <boost/log/trivial.hpp>
+#include "logging.h"
 #include <cmath>
 #include <csignal>
 #include <atomic>
@@ -206,6 +207,7 @@ void discoveryThread(unsigned short port) {
             if (msg == "DISCOVER_VKGRID_SERVER") {
                 std::string resp = "VKGRID_SERVER:" + std::to_string(port);
                 sock.send_to(boost::asio::buffer(resp), broadcast_ep);
+                BOOST_LOG_TRIVIAL(info) << "Sent discovery response to " << sender.address().to_string();
             }
         }
 
@@ -213,6 +215,7 @@ void discoveryThread(unsigned short port) {
         if (now >= next_announce) {
             std::string resp = "VKGRID_SERVER:" + std::to_string(port);
             sock.send_to(boost::asio::buffer(resp), broadcast_ep);
+            BOOST_LOG_TRIVIAL(info) << "Broadcast ping";
             next_announce = now + std::chrono::seconds(2);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -223,7 +226,7 @@ void discoveryThread(unsigned short port) {
 void session(tcp::socket sock) {
     VulkanOffscreen gfx;
     float t = 0.0f;
-    std::cout << "[Server] New session started from " << sock.remote_endpoint() << '\n';
+    BOOST_LOG_TRIVIAL(info) << "New session started from " << sock.remote_endpoint();
 
     try {
         while (serverRunning.load() && sock.is_open()) {
@@ -246,12 +249,12 @@ void session(tcp::socket sock) {
            e.code() != boost::asio::error::eof &&
            e.code() != boost::asio::error::connection_reset &&
            e.code() != boost::asio::error::connection_aborted)
-            std::cerr << "Session error: " << e.what() << '\n';
+            BOOST_LOG_TRIVIAL(error) << "Session error: " << e.what();
     } catch (const std::exception& e) {
-        std::cerr << "Session error: " << e.what() << '\n';
+        BOOST_LOG_TRIVIAL(error) << "Session error: " << e.what();
     }
 
-    std::cout << "[Server] Session ended for " << sock.remote_endpoint() << '\n';
+    BOOST_LOG_TRIVIAL(info) << "Session ended for " << sock.remote_endpoint();
     boost::system::error_code ec;
     sock.shutdown(tcp::socket::shutdown_both, ec);
     sock.close(ec);
@@ -265,12 +268,14 @@ int main(int argc, char* argv[]) {
 
     signal(SIGINT, handleSignal);
 
+    init_logging("Server");
+
     std::thread dThread(discoveryThread, port);
     boost::asio::io_context ctx;
     tcp::acceptor acceptor(ctx, {tcp::v4(), port});
     acceptor.non_blocking(true);
-    std::cout << "[Server] Listening on port " << port << "\n";
-    std::cout << "[Server] Discovery on UDP port 5001\n";
+    BOOST_LOG_TRIVIAL(info) << "Listening on port " << port;
+    BOOST_LOG_TRIVIAL(info) << "Discovery on UDP port 5001";
     while (serverRunning.load()) {
         tcp::socket sock(ctx);
         boost::system::error_code ec;
@@ -281,7 +286,7 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             else {
-                std::cerr << "Accept error: " << ec.message() << "\n";
+                BOOST_LOG_TRIVIAL(error) << "Accept error: " << ec.message();
                 break;
             }
         }
@@ -290,6 +295,6 @@ int main(int argc, char* argv[]) {
     acceptor.close();
     serverRunning.store(false);
     dThread.join();
-    std::cout << "[Server] Shutting down" << std::endl;
+    BOOST_LOG_TRIVIAL(info) << "Shutting down";
     return 0;
 }

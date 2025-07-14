@@ -12,7 +12,7 @@
 #include <memory>
 #include <set>
 #include <cstring>
-#include <iostream>
+#include <boost/log/trivial.hpp>
 #include <zstd.h>
 #include <boost/asio.hpp>
 #include <vulkan/vulkan.hpp>
@@ -56,6 +56,7 @@ inline VulkanWindow::~VulkanWindow() {
         boost::system::error_code ec;
         m_sock->shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
         m_sock->close(ec);
+        BOOST_LOG_TRIVIAL(info) << "Disconnected from server";
     }
 }
 
@@ -77,7 +78,7 @@ inline void VulkanWindow::networkThread(const std::string &host, const std::stri
             std::vector<uint8_t> pixels(orig);
             size_t dsize = ZSTD_decompress(pixels.data(), orig, cbuf.data(), csize);
             if (ZSTD_isError(dsize)) {
-                std::cerr << "[Client] decompress error\n";
+                BOOST_LOG_TRIVIAL(error) << "decompress error";
                 continue;
             }
             std::lock_guard<std::mutex> lk(m_mutex);
@@ -89,11 +90,12 @@ inline void VulkanWindow::networkThread(const std::string &host, const std::stri
             e.code() != boost::asio::error::eof &&
             e.code() != boost::asio::error::connection_reset &&
             e.code() != boost::asio::error::connection_aborted)
-            std::cerr << "[Client] network error: " << e.what() << '\n';
+            BOOST_LOG_TRIVIAL(error) << "network error: " << e.what();
     } catch (const std::exception &e) {
-        std::cerr << "[Client] network error: " << e.what() << '\n';
+        BOOST_LOG_TRIVIAL(error) << "network error: " << e.what();
     }
     m_running = false;
+    BOOST_LOG_TRIVIAL(info) << "Network thread exiting";
 }
 
 inline void VulkanWindow::run(QApplication &app) {
@@ -101,7 +103,7 @@ inline void VulkanWindow::run(QApplication &app) {
     const uint32_t WIDTH = 800, HEIGHT = 600;
 
     if (!m_qInst.create()) {
-        std::cout << "Failed to create QVulkanInstance" << std::endl;
+        BOOST_LOG_TRIVIAL(error) << "Failed to create QVulkanInstance";
         return;
     }
     setVulkanInstance(&m_qInst);
@@ -178,7 +180,9 @@ inline void VulkanWindow::run(QApplication &app) {
 
     boost::asio::io_context ctx;
     m_sock = std::make_shared<tcp::socket>(ctx);
+    BOOST_LOG_TRIVIAL(info) << "Connecting to " << m_info.address << ':' << m_info.port;
     boost::asio::connect(*m_sock, tcp::resolver(ctx).resolve(m_info.address, m_info.port));
+    BOOST_LOG_TRIVIAL(info) << "Connected to server";
     m_netThread = std::thread(&VulkanWindow::networkThread, this, m_info.address, m_info.port);
 
     while (isVisible() && m_running.load()) {

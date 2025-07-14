@@ -16,6 +16,7 @@
 #include <string_view>
 #include <boost/asio.hpp>
 #include <boost/asio/ip/udp.hpp>
+#include <boost/log/trivial.hpp>
 
 struct ServerInfo {
     std::string address;
@@ -135,6 +136,7 @@ inline void DiscoveryWindow::discoveryThreadFunc() {
         if (now >= next_ping) {
             std::string msg = "DISCOVER_VKGRID_SERVER";
             sock.send_to(boost::asio::buffer(msg), broadcast_ep);
+            BOOST_LOG_TRIVIAL(info) << "Broadcast ping";
             next_ping = now + std::chrono::seconds(1);
         }
 
