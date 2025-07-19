@@ -17,7 +17,7 @@ set(CMAKE_AUTOUIC  ON)
 # Remember to pass -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
 find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Core Widgets Gui)
 find_package(Vulkan       REQUIRED)
-find_package(Boost 1.85 REQUIRED
+find_package(Boost 1.85 CONFIG REQUIRED
   COMPONENTS
     system
     json
