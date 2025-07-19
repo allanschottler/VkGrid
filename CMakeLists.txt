@@ -23,6 +23,7 @@ find_package(Boost 1.85 CONFIG REQUIRED
     json
     thread
     date_time
+    regex
     atomic
     filesystem
     chrono
@@ -41,6 +42,7 @@ target_link_libraries(vkgrid_server PRIVATE
   Boost::json
   Boost::thread
   Boost::date_time
+  Boost::regex
   Boost::atomic
   Boost::filesystem
   Boost::chrono
@@ -73,6 +75,7 @@ target_link_libraries(vkgrid_client PRIVATE
   Boost::json
   Boost::thread
   Boost::date_time
+  Boost::regex
   Boost::atomic
   Boost::filesystem
   Boost::chrono
