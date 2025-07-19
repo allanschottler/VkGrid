@@ -5,9 +5,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall)
 
-if (WIN32)
-  add_compile_definitions(BOOST_LOG_DYN_LINK)
-endif()
+# Link Boost statically on all platforms
+set(Boost_USE_STATIC_LIBS ON)
 
 # Enable Qt’s automoc/uic
 set(CMAKE_AUTOMOC  ON)

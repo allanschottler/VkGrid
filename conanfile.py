@@ -16,8 +16,9 @@ class Conan(ConanFile):
         "CMakeLists.txt",
         "include/*",
     ]
+    # Link Boost statically so that Boost.Log does not require runtime DLLs
     default_options = {
-        "boost/1.85.0:shared": True
+        "boost/1.85.0:shared": False
     }
 
     def requirements(self):
@@ -30,8 +31,9 @@ class Conan(ConanFile):
         })
         self.requires("vulkan-loader/1.3.239.0")
         self.requires("vulkan-headers/1.3.239.0")
+        # Request static Boost libraries
         self.requires("boost/1.85.0", options={
-            "shared": True
+            "shared": False
         })
         self.requires("zstd/1.5.5")
 
