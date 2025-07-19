@@ -24,6 +24,8 @@ find_package(Boost 1.85 CONFIG REQUIRED
     thread
     date_time
     atomic
+    filesystem
+    chrono
     log
     log_setup
 )
@@ -40,6 +42,8 @@ target_link_libraries(vkgrid_server PRIVATE
   Boost::thread
   Boost::date_time
   Boost::atomic
+  Boost::filesystem
+  Boost::chrono
 
   # Boost.Log
   Boost::log_setup
@@ -70,6 +74,8 @@ target_link_libraries(vkgrid_client PRIVATE
   Boost::thread
   Boost::date_time
   Boost::atomic
+  Boost::filesystem
+  Boost::chrono
 
   # Boost.Log
   Boost::log_setup
