@@ -5,9 +5,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall)
 
-if (WIN32)
-  add_compile_definitions(BOOST_LOG_DYN_LINK)
-endif()
+# Link Boost statically on all platforms
+set(Boost_USE_STATIC_LIBS ON)
 
 # Enable Qt’s automoc/uic
 set(CMAKE_AUTOMOC  ON)
@@ -18,7 +17,7 @@ set(CMAKE_AUTOUIC  ON)
 # Remember to pass -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
 find_package(Qt6 6.8 CONFIG REQUIRED COMPONENTS Core Widgets Gui)
 find_package(Vulkan       REQUIRED)
-find_package(Boost 1.85 REQUIRED
+find_package(Boost 1.85 CONFIG REQUIRED
   COMPONENTS
     system
     json
