@@ -3,17 +3,12 @@ project(vkgrid LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_VERBOSE_MAKEFILE ON)
+# set(CMAKE_VERBOSE_MAKEFILE ON)
 # add_compile_options(-Wall)
 
 if(WIN32)
   add_compile_definitions(_WIN32_WINNT=0x0A00)  # Windows 10
-  # add_compile_definitions(NOMINMAX)             # Disable min/max macros
-  # add_compile_definitions(UNICODE)               # Use Unicode
 endif()
-
-# add_compile_definitions(BOOST_ALL_STATIC_LINK)  # static linking for Boost.Log
-# add_compile_definitions(BOOST_LOG_STATIC_LINK)  # use static libs for Boost.Log
 
 set(CMAKE_AUTOMOC  ON)
 set(CMAKE_AUTORCC  ON)
@@ -25,11 +20,17 @@ find_package(Boost 1.85 CONFIG REQUIRED COMPONENTS
   log log_setup filesystem thread json
   date_time regex chrono system atomic)
 
+if(QT6_ROOT_PATH)
+  set(QWindowsPlugin "${QT6_ROOT_PATH}/platforms") 
+else()
+  message(WARNING "QT6_ROOT_PATH not set by Conan")
+endif()
+
+
 add_executable(vkgrid_server vkgrid_server.cpp)
 target_link_libraries(vkgrid_server PRIVATE
   Vulkan::Vulkan
   Qt6::Core
-  # Boost::disable_autolinking
   Boost::log_setup
   Boost::log
   Boost::system
@@ -45,6 +46,14 @@ target_link_libraries(vkgrid_server PRIVATE
   Ws2_32
   Mswsock
 )
+if(EXISTS "${QWindowsPlugin}")
+  message(STATUS "Found qwindows.dll at: ${QWindowsPlugin}")
+  add_custom_command(TARGET vkgrid_server POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory 
+      "${QWindowsPlugin}"
+      "$<TARGET_FILE_DIR:vkgrid_server>/platforms" 
+  )
+endif()
 
 add_executable(vkgrid_client
   vkgrid_client.cpp
@@ -56,7 +65,6 @@ target_link_libraries(vkgrid_client PRIVATE
   Qt6::Widgets
   Qt6::Gui
   Qt6::Core
-  # Boost::disable_autolinking
   Boost::log_setup
   Boost::log
   Boost::system
@@ -71,3 +79,11 @@ target_link_libraries(vkgrid_client PRIVATE
   Advapi32
   Ws2_32
 )
+if(EXISTS "${QWindowsPlugin}")
+  message(STATUS "Found qwindows.dll at: ${QWindowsPlugin}")
+  add_custom_command(TARGET vkgrid_client POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory 
+      "${QWindowsPlugin}"
+      "$<TARGET_FILE_DIR:vkgrid_client>/platforms" 
+  )
+endif()

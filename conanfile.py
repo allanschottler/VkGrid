@@ -11,7 +11,7 @@ class Conan(ConanFile):
     topics = ("Vulkan", "C++")
     
     settings = "os", "compiler", "build_type", "arch"
-    generators = "CMakeDeps", "CMakeToolchain"
+    generators = "CMakeDeps" #, "CMakeToolchain"
     default_options = {
         "boost/*:shared": False
     }
@@ -22,7 +22,7 @@ class Conan(ConanFile):
             "widgets": True,
             "with_vulkan": True,
             "with_zstd": True,
-            "shared": False
+            "shared": True
         })
         self.requires("vulkan-loader/1.3.239.0")
         self.requires("vulkan-headers/1.3.239.0")
@@ -30,6 +30,12 @@ class Conan(ConanFile):
             "shared": False
         })
         self.requires("zstd/1.5.5")
+
+    def generate(self):
+        tc = CMakeToolchain(self)
+        qt_pkg_path = self.dependencies["qt"].package_folder
+        tc.cache_variables["QT6_ROOT_PATH"] = qt_pkg_path.replace("\\", "/")
+        tc.generate()
 
     def layout(self):
         cmake_layout(self)

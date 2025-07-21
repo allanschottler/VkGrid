@@ -11,8 +11,8 @@
 int main(int argc, char **argv) {
     init_logging("Client");
     BOOST_LOG_TRIVIAL(info) << "VkGrid Remote Client";
-    QApplication app(argc, argv);
 
+    QApplication app(argc, argv);
     DiscoveryWindow dlg;
     if(dlg.exec() != QDialog::Accepted) return 0;
     ServerInfo info = dlg.selectedServer();

@@ -207,7 +207,6 @@ void discoveryThread(unsigned short port) {
             if (msg == "DISCOVER_VKGRID_SERVER") {
                 std::string resp = "VKGRID_SERVER:" + std::to_string(port);
                 sock.send_to(boost::asio::buffer(resp), broadcast_ep);
-                BOOST_LOG_TRIVIAL(info) << "Sent discovery response to " << sender.address().to_string();
             }
         }
 
@@ -215,7 +214,6 @@ void discoveryThread(unsigned short port) {
         if (now >= next_announce) {
             std::string resp = "VKGRID_SERVER:" + std::to_string(port);
             sock.send_to(boost::asio::buffer(resp), broadcast_ep);
-            BOOST_LOG_TRIVIAL(info) << "Broadcast ping";
             next_announce = now + std::chrono::seconds(2);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
