@@ -194,7 +194,11 @@ void discoveryThread(unsigned short port) {
     sock.bind(udp::endpoint(udp::v4(), 5001));
 
     udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
-    auto next_announce = std::chrono::steady_clock::now();
+    // Send one announcement when the server starts
+    {
+        std::string resp = "VKGRID_SERVER:" + std::to_string(port);
+        sock.send_to(boost::asio::buffer(resp), broadcast_ep);
+    }
 
     sock.non_blocking(true);
     while (serverRunning.load()) {
@@ -210,12 +214,6 @@ void discoveryThread(unsigned short port) {
             }
         }
 
-        auto now = std::chrono::steady_clock::now();
-        if (now >= next_announce) {
-            std::string resp = "VKGRID_SERVER:" + std::to_string(port);
-            sock.send_to(boost::asio::buffer(resp), broadcast_ep);
-            next_announce = now + std::chrono::seconds(2);
-        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     sock.close();

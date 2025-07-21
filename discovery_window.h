@@ -103,7 +103,9 @@ inline void DiscoveryWindow::discoveryThreadFunc() {
     sock.bind(udp::endpoint(udp::v4(), 5001));
 
     udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
-    auto next_ping = std::chrono::steady_clock::now();
+    // Send discovery ping once at startup
+    sock.send_to(
+        boost::asio::buffer(std::string("DISCOVER_VKGRID_SERVER")), broadcast_ep);
     sock.non_blocking(true);
 
     while (m_running.load()) {
@@ -133,11 +135,6 @@ inline void DiscoveryWindow::discoveryThreadFunc() {
         }
 
         auto now = std::chrono::steady_clock::now();
-        if (now >= next_ping) {
-            std::string msg = "DISCOVER_VKGRID_SERVER";
-            sock.send_to(boost::asio::buffer(msg), broadcast_ep);
-            next_ping = now + std::chrono::seconds(1);
-        }
 
         {
             std::lock_guard<std::mutex> lk(m_mutex);
