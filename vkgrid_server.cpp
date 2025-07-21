@@ -194,9 +194,11 @@ void discoveryThread(unsigned short port) {
     sock.bind(udp::endpoint(udp::v4(), 5001));
 
     udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
-    auto next_announce = std::chrono::steady_clock::now();
-
     sock.non_blocking(true);
+
+    // Announce availability once on startup
+    std::string announce = "VKGRID_SERVER:" + std::to_string(port);
+    sock.send_to(boost::asio::buffer(announce), broadcast_ep);
     while (serverRunning.load()) {
         std::array<char, 64> buf{};
         udp::endpoint sender;
@@ -206,18 +208,15 @@ void discoveryThread(unsigned short port) {
             std::string msg(buf.data(), len);
             if (msg == "DISCOVER_VKGRID_SERVER") {
                 std::string resp = "VKGRID_SERVER:" + std::to_string(port);
-                sock.send_to(boost::asio::buffer(resp), broadcast_ep);
+                sock.send_to(boost::asio::buffer(resp), sender);
             }
         }
 
-        auto now = std::chrono::steady_clock::now();
-        if (now >= next_announce) {
-            std::string resp = "VKGRID_SERVER:" + std::to_string(port);
-            sock.send_to(boost::asio::buffer(resp), broadcast_ep);
-            next_announce = now + std::chrono::seconds(2);
-        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    // Notify clients that this server is going offline
+    std::string bye = "VKGRID_SERVER_OFFLINE:" + std::to_string(port);
+    sock.send_to(boost::asio::buffer(bye), broadcast_ep);
     sock.close();
 }
 

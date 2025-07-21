@@ -103,8 +103,11 @@ inline void DiscoveryWindow::discoveryThreadFunc() {
     sock.bind(udp::endpoint(udp::v4(), 5001));
 
     udp::endpoint broadcast_ep(boost::asio::ip::address_v4::broadcast(), 5001);
-    auto next_ping = std::chrono::steady_clock::now();
     sock.non_blocking(true);
+
+    // Query available servers once on startup
+    sock.send_to(boost::asio::buffer(std::string{"DISCOVER_VKGRID_SERVER"}),
+                 broadcast_ep);
 
     while (m_running.load()) {
         std::array<char, 64> buf{};
@@ -113,9 +116,20 @@ inline void DiscoveryWindow::discoveryThreadFunc() {
         size_t len = sock.receive_from(boost::asio::buffer(buf), sender, 0, ec);
         if (!ec && len > 0) {
             std::string msg(buf.data(), len);
-            constexpr std::string_view prefix = "VKGRID_SERVER:";
-            if (msg.rfind(prefix, 0) == 0) {
-                std::string port = msg.substr(prefix.size());
+            constexpr std::string_view prefix_off = "VKGRID_SERVER_OFFLINE:";
+            constexpr std::string_view prefix_on  = "VKGRID_SERVER:";
+            if (msg.rfind(prefix_off, 0) == 0) {
+                std::string port = msg.substr(prefix_off.size());
+                std::lock_guard<std::mutex> lk(m_mutex);
+                m_discovered.erase(
+                    std::remove_if(m_discovered.begin(), m_discovered.end(),
+                                   [&](const DiscoveredServer &s) {
+                                       return s.info.address == sender.address().to_string() &&
+                                              s.info.port == port;
+                                   }),
+                    m_discovered.end());
+            } else if (msg.rfind(prefix_on, 0) == 0) {
+                std::string port = msg.substr(prefix_on.size());
                 auto now = std::chrono::steady_clock::now();
                 std::lock_guard<std::mutex> lk(m_mutex);
                 bool found = false;
@@ -133,23 +147,6 @@ inline void DiscoveryWindow::discoveryThreadFunc() {
         }
 
         auto now = std::chrono::steady_clock::now();
-        if (now >= next_ping) {
-            std::string msg = "DISCOVER_VKGRID_SERVER";
-            sock.send_to(boost::asio::buffer(msg), broadcast_ep);
-            next_ping = now + std::chrono::seconds(1);
-        }
-
-        {
-            std::lock_guard<std::mutex> lk(m_mutex);
-            auto it = m_discovered.begin();
-            while (it != m_discovered.end()) {
-                if (now - it->last_seen > std::chrono::seconds(5))
-                    it = m_discovered.erase(it);
-                else
-                    ++it;
-            }
-        }
-
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
